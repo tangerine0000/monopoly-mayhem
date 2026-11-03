@@ -1,0 +1,8 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+[[hooks]]
+stage = "pre_build"
+command = "python"
+command_arguments = ["../../scripts/sanitize_svg.py"]
