@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "crates/monopoly-proto",
+    "crates/monopoly-core",
+    "crates/monopoly-server",
+    "crates/monopoly-client",
+]
+resolver = "2"
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+strip = "symbols"
