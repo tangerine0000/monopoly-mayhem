@@ -277,7 +277,10 @@ async fn test_2player_waiting_room_and_host_start_game() {
             break;
         }
     }
-    assert!(p2_started, "Player 2 should receive GameStarted for 2-player room");
+    assert!(
+        p2_started,
+        "Player 2 should receive GameStarted for 2-player room"
+    );
 }
 
 #[tokio::test]
@@ -299,7 +302,10 @@ async fn test_host_add_bot_and_start_game() {
     let _ = recv_msg(&mut stream1).await.expect("Initial SyncSnapshot");
 
     send_json(&mut sink1, &ClientMessage::AddBot).await;
-    match recv_msg(&mut stream1).await.expect("SyncSnapshot after AddBot") {
+    match recv_msg(&mut stream1)
+        .await
+        .expect("SyncSnapshot after AddBot")
+    {
         ServerMessage::SyncSnapshot { state } => {
             let players = state["players"].as_array().unwrap();
             assert_eq!(players.len(), 2);

@@ -1,7 +1,7 @@
 use crate::palette::{
     get_district_color, get_district_label, BOARD_CENTER_BG, BOARD_CENTER_BORDER, BOARD_OUTER_BG,
-    PLAYER_COLORS, STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_PANEL,
-    TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHANCE_BG,
+    PLAYER_COLORS, STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_PANEL, TEXT_MUTED,
+    TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHANCE_BG,
     TILE_CHANCE_BORDER, TILE_CHANCE_INNER_BG, TILE_CHEST, TILE_CHEST_BG, TILE_CHEST_BORDER,
     TILE_CHEST_INNER_BG, TILE_CORNER_ACCENT, TILE_CORNER_BG, TILE_SELECTED_STROKE, TILE_STATION,
     TILE_STROKE, TILE_TAX, TILE_TEXT_MUTED, TILE_TEXT_PRIMARY, TILE_UTILITY,
@@ -18,7 +18,7 @@ pub const BOARD_HEIGHT: f64 = 960.0;
 pub const CORNER_W: f64 = 145.0;
 pub const CORNER_H: f64 = 120.0;
 pub const HORIZ_TILE_W: f64 = 110.0; // (1280 - 2 * 145) / 9 = 110
-pub const VERT_TILE_H: f64 = 80.0;   // (960 - 2 * 120) / 9 = 80
+pub const VERT_TILE_H: f64 = 80.0; // (960 - 2 * 120) / 9 = 80
 pub const HEADER_THICKNESS: f64 = 20.0;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -32,7 +32,12 @@ pub struct BoardFloatingPopup {
 /// Returns `(rx, ry, w, h)` for any tile `0..40` on the `1280x960` board with zero overlap.
 pub fn get_tile_rect(index: u8) -> (f64, f64, f64, f64) {
     match index {
-        0 => (BOARD_WIDTH - CORNER_W, BOARD_HEIGHT - CORNER_H, CORNER_W, CORNER_H),
+        0 => (
+            BOARD_WIDTH - CORNER_W,
+            BOARD_HEIGHT - CORNER_H,
+            CORNER_W,
+            CORNER_H,
+        ),
         1..=9 => {
             let i = index as f64;
             let rx = (BOARD_WIDTH - CORNER_W) - i * HORIZ_TILE_W;
@@ -204,7 +209,14 @@ fn render_3d_die_cube(value: u8, rolling: bool, is_left: bool, is_doubles: bool)
 }
 
 /// Renders crisp vector Monopoly illustrations for corners and special tiles without overlapping text.
-fn render_tile_illustration(idx: u8, kind: &TileKind, rx: f64, ry: f64, w: f64, h: f64) -> impl IntoView {
+fn render_tile_illustration(
+    idx: u8,
+    kind: &TileKind,
+    rx: f64,
+    ry: f64,
+    w: f64,
+    h: f64,
+) -> impl IntoView {
     match kind {
         TileKind::Go => {
             let cx = rx + w / 2.0;
@@ -286,7 +298,8 @@ fn render_tile_illustration(idx: u8, kind: &TileKind, rx: f64, ry: f64, w: f64, 
                     <rect x=cx - 2.0 y=cy - 8.0 width="4" height="9" rx="1.5" fill="#f5f0e4" />
                     <circle cx=cx cy=cy + 5.5 r="2.2" fill="#f5f0e4" />
                 </g>
-            }.into_view()
+            }
+            .into_view()
         }
         TileKind::Chance => {
             let (ix, iy) = if idx < 10 {
@@ -312,7 +325,8 @@ fn render_tile_illustration(idx: u8, kind: &TileKind, rx: f64, ry: f64, w: f64, 
                 >
                     "?"
                 </text>
-            }.into_view()
+            }
+            .into_view()
         }
         TileKind::CommunityChest => {
             let (ix, iy) = if idx < 10 {
@@ -2128,8 +2142,14 @@ mod tests {
             assert!(rx >= 0.0, "Tile {idx} rx < 0");
             assert!(ry >= 0.0, "Tile {idx} ry < 0");
             assert!(w > 0.0 && h > 0.0, "Tile {idx} invalid size");
-            assert!(rx + w <= BOARD_WIDTH + 1e-6, "Tile {idx} exceeds BOARD_WIDTH");
-            assert!(ry + h <= BOARD_HEIGHT + 1e-6, "Tile {idx} exceeds BOARD_HEIGHT");
+            assert!(
+                rx + w <= BOARD_WIDTH + 1e-6,
+                "Tile {idx} exceeds BOARD_WIDTH"
+            );
+            assert!(
+                ry + h <= BOARD_HEIGHT + 1e-6,
+                "Tile {idx} exceeds BOARD_HEIGHT"
+            );
 
             let (cx, cy) = get_tile_center(idx);
             assert!(cx > rx && cx < rx + w, "Tile {idx} center X outside rect");
@@ -2168,7 +2188,10 @@ mod tests {
         for val in 1..=6u8 {
             let mask = die_face_pip_mask(val);
             let pip_count = mask.into_iter().filter(|&b| b).count();
-            assert_eq!(pip_count, val as usize, "Face {val} pip mask count mismatch");
+            assert_eq!(
+                pip_count, val as usize,
+                "Face {val} pip mask count mismatch"
+            );
             assert!(!die_3d_settled_transform(val).is_empty());
         }
     }
@@ -2178,7 +2201,12 @@ mod tests {
         for tile in get_board() {
             let lines = wrap_tile_name(&tile.name, 13);
             assert!(!lines.is_empty());
-            assert!(lines.len() <= 3, "Tile {} wrapped into too many lines: {:?}", tile.name, lines);
+            assert!(
+                lines.len() <= 3,
+                "Tile {} wrapped into too many lines: {:?}",
+                tile.name,
+                lines
+            );
         }
     }
 }

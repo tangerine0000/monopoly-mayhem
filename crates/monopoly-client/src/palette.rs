@@ -70,12 +70,7 @@ pub const PLAYER_COLORS: [&str; 4] = [
     "#d49b35", // Seat 4: Brass
 ];
 
-pub const PLAYER_AVATARS: [&str; 4] = [
-    "T1",
-    "T2",
-    "T3",
-    "T4",
-];
+pub const PLAYER_AVATARS: [&str; 4] = ["T1", "T2", "T3", "T4"];
 
 // ============================================================================
 // Saigon District Color Bands

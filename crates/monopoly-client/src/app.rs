@@ -164,9 +164,12 @@ fn execute_local_action(
                 && new_state.turn_phase == TurnPhase::TurnEnded
                 && new_state.players.len() == 1
             {
-                if let Ok((end_state, end_events)) =
-                    apply_action(&new_state, actor_id, &ClientMessage::EndTurn, &mut rand::thread_rng())
-                {
+                if let Ok((end_state, end_events)) = apply_action(
+                    &new_state,
+                    actor_id,
+                    &ClientMessage::EndTurn,
+                    &mut rand::thread_rng(),
+                ) {
                     new_state = end_state;
                     events.extend(end_events);
                 }
@@ -249,15 +252,12 @@ fn execute_local_action(
 
             let next_bot_id = if new_state.turn_phase == TurnPhase::Auction {
                 new_state.auction.as_ref().and_then(|auc| {
-                    auc.active_bidders
-                        .iter()
-                        .copied()
-                        .find(|bidder_id| {
-                            new_state
-                                .find_player(*bidder_id)
-                                .map(|p| p.is_bot_controlled)
-                                .unwrap_or(false)
-                        })
+                    auc.active_bidders.iter().copied().find(|bidder_id| {
+                        new_state
+                            .find_player(*bidder_id)
+                            .map(|p| p.is_bot_controlled)
+                            .unwrap_or(false)
+                    })
                 })
             } else {
                 new_state
@@ -347,7 +347,8 @@ pub fn App() -> impl IntoView {
     let (landing_tile_burst, set_landing_tile_burst) = create_signal::<Option<u8>>(None);
     let (recent_acquired_tile, set_recent_acquired_tile) = create_signal::<Option<u8>>(None);
     let (recent_house_tile, set_recent_house_tile) = create_signal::<Option<u8>>(None);
-    let (floating_popups, set_floating_popups) = create_signal::<Vec<BoardFloatingPopup>>(Vec::new());
+    let (floating_popups, set_floating_popups) =
+        create_signal::<Vec<BoardFloatingPopup>>(Vec::new());
     let (popup_seq, set_popup_seq) = create_signal(1u64);
     let (cash_delta_badge, set_cash_delta_badge) = create_signal::<Option<(String, bool)>>(None);
     let (drawn_card_banner, set_drawn_card_banner) =
@@ -355,8 +356,7 @@ pub fn App() -> impl IntoView {
 
     // Buffered state/card while dice tumble & pawn hops so UI updates right when landing
     let (pending_snapshot, set_pending_snapshot) = create_signal::<Option<GameState>>(None);
-    let (pending_card, set_pending_card) =
-        create_signal::<Option<(String, String, String)>>(None);
+    let (pending_card, set_pending_card) = create_signal::<Option<(String, String, String)>>(None);
 
     let (ws_client, set_ws_client) = create_signal::<Option<Rc<WsClient>>>(None);
     let (error_toast, set_error_toast) = create_signal::<Option<String>>(None);
@@ -415,7 +415,8 @@ pub fn App() -> impl IntoView {
     };
 
     let (is_local_mode, set_is_local_mode) = create_signal(false);
-    let (local_authoritative_state, set_local_authoritative_state) = create_signal(GameState::new());
+    let (local_authoritative_state, set_local_authoritative_state) =
+        create_signal(GameState::new());
 
     let process_server_message = Callback::new(move |server_msg: ServerMessage| match server_msg {
         ServerMessage::RoomJoined {
@@ -432,435 +433,398 @@ pub fn App() -> impl IntoView {
                 seat_index + 1
             ));
         }
-                ServerMessage::GameStarted { turn_order: _ } => {
-                    add_log("Ván đấu bắt đầu".to_string());
+        ServerMessage::GameStarted { turn_order: _ } => {
+            add_log("Ván đấu bắt đầu".to_string());
+        }
+        ServerMessage::TurnStarted {
+            active_player,
+            time_limit_seconds,
+        } => {
+            set_timer_seconds.set(time_limit_seconds);
+            let latest_state = pending_snapshot
+                .get_untracked()
+                .unwrap_or_else(|| game_state.get_untracked());
+            let name = latest_state
+                .find_player(active_player)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Người chơi".to_string());
+            add_log(format!("Đến lượt của {}", name));
+        }
+        ServerMessage::TimerTick { seconds_remaining } => {
+            set_timer_seconds.set(seconds_remaining);
+            if seconds_remaining <= 5 && seconds_remaining > 0 {
+                let is_my_turn = my_player_id.get_untracked().is_some()
+                    && game_state.get_untracked().current_player().map(|p| p.id)
+                        == my_player_id.get_untracked();
+                if is_my_turn {
+                    play_monopoly_sound("urgent");
                 }
-                ServerMessage::TurnStarted {
-                    active_player,
-                    time_limit_seconds,
-                } => {
-                    set_timer_seconds.set(time_limit_seconds);
-                    let latest_state = pending_snapshot
-                        .get_untracked()
-                        .unwrap_or_else(|| game_state.get_untracked());
-                    let name = latest_state
-                        .find_player(active_player)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_else(|| "Người chơi".to_string());
-                    add_log(format!("Đến lượt của {}", name));
+            }
+            if seconds_remaining == 30 {
+                let is_my_turn = my_player_id.get_untracked().is_some()
+                    && game_state.get_untracked().current_player().map(|p| p.id)
+                        == my_player_id.get_untracked();
+                if is_my_turn {
+                    let warn_msg = "Cảnh báo: Còn 30 giây trước khi hết lượt!".to_string();
+                    set_error_toast.set(Some(warn_msg.clone()));
+                    add_log(warn_msg);
                 }
-                ServerMessage::TimerTick { seconds_remaining } => {
-                    set_timer_seconds.set(seconds_remaining);
-                    if seconds_remaining <= 5 && seconds_remaining > 0 {
-                        let is_my_turn = my_player_id.get_untracked().is_some()
-                            && game_state.get_untracked().current_player().map(|p| p.id)
-                                == my_player_id.get_untracked();
-                        if is_my_turn {
-                            play_monopoly_sound("urgent");
-                        }
-                    }
-                    if seconds_remaining == 30 {
-                        let is_my_turn = my_player_id.get_untracked().is_some()
-                            && game_state.get_untracked().current_player().map(|p| p.id)
-                                == my_player_id.get_untracked();
-                        if is_my_turn {
-                            let warn_msg = "Cảnh báo: Còn 30 giây trước khi hết lượt!".to_string();
-                            set_error_toast.set(Some(warn_msg.clone()));
-                            add_log(warn_msg);
-                        }
-                    }
-                }
-                ServerMessage::DiceRolled {
-                    player_id,
-                    dice,
-                    new_tile_index,
-                    is_doubles,
-                } => {
-                    play_monopoly_sound("roll");
-                    set_drawn_card_banner.set(None);
-                    set_pending_card.set(None);
-                    set_landing_tile_burst.set(None);
-                    set_step_trail.set(Vec::new());
-                    set_is_rolling.set(true);
-                    set_is_animating_move.set(true);
+            }
+        }
+        ServerMessage::DiceRolled {
+            player_id,
+            dice,
+            new_tile_index,
+            is_doubles,
+        } => {
+            play_monopoly_sound("roll");
+            set_drawn_card_banner.set(None);
+            set_pending_card.set(None);
+            set_landing_tile_burst.set(None);
+            set_step_trail.set(Vec::new());
+            set_is_rolling.set(true);
+            set_is_animating_move.set(true);
 
-                    let shuffle_faces: [(u8, u8); 7] = [
-                        (6, 2),
-                        (3, 5),
-                        (1, 4),
-                        (5, 6),
-                        (2, 3),
-                        (4, 1),
-                        (6, 5),
-                    ];
-                    for (frame_idx, pair) in shuffle_faces.into_iter().enumerate() {
+            let shuffle_faces: [(u8, u8); 7] =
+                [(6, 2), (3, 5), (1, 4), (5, 6), (2, 3), (4, 1), (6, 5)];
+            for (frame_idx, pair) in shuffle_faces.into_iter().enumerate() {
+                set_timeout(
+                    move || {
+                        if is_rolling.get_untracked() {
+                            set_display_dice.set(pair);
+                        }
+                    },
+                    Duration::from_millis((frame_idx as u64) * 70),
+                );
+            }
+
+            let seat_idx = game_state
+                .get_untracked()
+                .players
+                .iter()
+                .position(|p| p.id == player_id)
+                .unwrap_or(0)
+                % 4;
+            let start_tile = visual_positions.get_untracked()[seat_idx];
+            let steps = ((new_tile_index + 40 - start_tile) % 40) as u64;
+
+            set_timeout(
+                move || {
+                    set_display_dice.set(dice);
+                    set_is_rolling.set(false);
+
+                    if steps == 0 {
+                        set_landing_tile_burst.set(Some(new_tile_index));
+                        set_selected_tile.set(Some(new_tile_index));
+                        set_hopping_seat.set(None);
+                        set_is_animating_move.set(false);
+                        if let Some(snap) = pending_snapshot.get_untracked() {
+                            set_pending_snapshot.set(None);
+                            commit_snapshot(snap);
+                        }
+                        return;
+                    }
+
+                    set_hopping_seat.set(Some(seat_idx));
+                    for step in 1..=steps {
+                        let intermediate_tile = ((start_tile as u64 + step) % 40) as u8;
+                        let is_last_step = step == steps;
                         set_timeout(
                             move || {
-                                if is_rolling.get_untracked() {
-                                    set_display_dice.set(pair);
+                                set_visual_positions.update(|positions| {
+                                    positions[seat_idx] = intermediate_tile;
+                                });
+                                set_step_trail.update(|trail| {
+                                    trail.push(intermediate_tile);
+                                    if trail.len() > 3 {
+                                        trail.remove(0);
+                                    }
+                                });
+
+                                if intermediate_tile == 0 && new_tile_index != 10 {
+                                    spawn_board_popup(
+                                        0,
+                                        "+2.000.000 đ · Qua Khởi hành".to_string(),
+                                        true,
+                                    );
                                 }
-                            },
-                            Duration::from_millis((frame_idx as u64) * 70),
-                        );
-                    }
 
-                    let seat_idx = game_state
-                        .get_untracked()
-                        .players
-                        .iter()
-                        .position(|p| p.id == player_id)
-                        .unwrap_or(0)
-                        % 4;
-                    let start_tile = visual_positions.get_untracked()[seat_idx];
-                    let steps = ((new_tile_index + 40 - start_tile) % 40) as u64;
+                                if is_last_step {
+                                    set_step_trail.set(Vec::new());
+                                    set_landing_tile_burst.set(Some(new_tile_index));
+                                    set_selected_tile.set(Some(new_tile_index));
 
-                    set_timeout(
-                        move || {
-                            set_display_dice.set(dice);
-                            set_is_rolling.set(false);
+                                    if let Some(card_info) = pending_card.get_untracked() {
+                                        set_pending_card.set(None);
+                                        set_drawn_card_banner.set(Some(card_info));
+                                        spawn_board_popup(
+                                            new_tile_index,
+                                            "Rút thẻ sự kiện".to_string(),
+                                            true,
+                                        );
+                                    }
 
-                            if steps == 0 {
-                                set_landing_tile_burst.set(Some(new_tile_index));
-                                set_selected_tile.set(Some(new_tile_index));
-                                set_hopping_seat.set(None);
-                                set_is_animating_move.set(false);
-                                if let Some(snap) = pending_snapshot.get_untracked() {
-                                    set_pending_snapshot.set(None);
-                                    commit_snapshot(snap);
-                                }
-                                return;
-                            }
+                                    let latest_snap = pending_snapshot
+                                        .get_untracked()
+                                        .unwrap_or_else(|| game_state.get_untracked());
+                                    let (final_server_pos, is_jailed) = latest_snap
+                                        .find_player(player_id)
+                                        .map(|p| (p.position, p.in_jail))
+                                        .unwrap_or((intermediate_tile, false));
 
-                            set_hopping_seat.set(Some(seat_idx));
-                            for step in 1..=steps {
-                                let intermediate_tile = ((start_tile as u64 + step) % 40) as u8;
-                                let is_last_step = step == steps;
-                                set_timeout(
-                                    move || {
-                                        set_visual_positions.update(|positions| {
-                                            positions[seat_idx] = intermediate_tile;
-                                        });
-                                        set_step_trail.update(|trail| {
-                                            trail.push(intermediate_tile);
-                                            if trail.len() > 3 {
-                                                trail.remove(0);
-                                            }
-                                        });
-
-                                        if intermediate_tile == 0 && new_tile_index != 10 {
+                                    if final_server_pos != intermediate_tile {
+                                        if is_jailed && final_server_pos == 10 {
+                                            play_monopoly_sound("jail");
                                             spawn_board_popup(
-                                                0,
-                                                "+2.000.000 đ · Qua Khởi hành".to_string(),
-                                                true,
+                                                intermediate_tile,
+                                                "Chuyển vào Khu tạm giam".to_string(),
+                                                false,
                                             );
-                                        }
-
-                                        if is_last_step {
-                                            set_step_trail.set(Vec::new());
-                                            set_landing_tile_burst.set(Some(new_tile_index));
-                                            set_selected_tile.set(Some(new_tile_index));
-
-                                            if let Some(card_info) = pending_card.get_untracked() {
-                                                set_pending_card.set(None);
-                                                set_drawn_card_banner.set(Some(card_info));
-                                                spawn_board_popup(
-                                                    new_tile_index,
-                                                    "Rút thẻ sự kiện".to_string(),
-                                                    true,
-                                                );
-                                            }
-
-                                            let latest_snap = pending_snapshot
-                                                .get_untracked()
-                                                .unwrap_or_else(|| game_state.get_untracked());
-                                            let (final_server_pos, is_jailed) = latest_snap
-                                                .find_player(player_id)
-                                                .map(|p| (p.position, p.in_jail))
-                                                .unwrap_or((intermediate_tile, false));
-
-                                            if final_server_pos != intermediate_tile {
-                                                if is_jailed && final_server_pos == 10 {
-                                                    play_monopoly_sound("jail");
-                                                    spawn_board_popup(
-                                                        intermediate_tile,
-                                                        "Chuyển vào Khu tạm giam".to_string(),
-                                                        false,
-                                                    );
-                                                    set_timeout(
-                                                        move || {
-                                                            set_visual_positions.update(|positions| {
-                                                                positions[seat_idx] = 10;
-                                                            });
+                                            set_timeout(
+                                                move || {
+                                                    set_visual_positions.update(|positions| {
+                                                        positions[seat_idx] = 10;
+                                                    });
+                                                    set_hopping_seat.set(None);
+                                                    set_is_animating_move.set(false);
+                                                    set_landing_tile_burst.set(Some(10));
+                                                    set_selected_tile.set(Some(10));
+                                                    if let Some(snap) =
+                                                        pending_snapshot.get_untracked()
+                                                    {
+                                                        set_pending_snapshot.set(None);
+                                                        commit_snapshot(snap);
+                                                    }
+                                                },
+                                                Duration::from_millis(450),
+                                            );
+                                        } else {
+                                            let extra_steps =
+                                                ((final_server_pos + 40 - intermediate_tile) % 40)
+                                                    as u64;
+                                            for extra in 1..=extra_steps {
+                                                let next_t =
+                                                    ((intermediate_tile as u64 + extra) % 40) as u8;
+                                                let is_final_extra = extra == extra_steps;
+                                                set_timeout(
+                                                    move || {
+                                                        set_visual_positions.update(|positions| {
+                                                            positions[seat_idx] = next_t;
+                                                        });
+                                                        if next_t == 0 {
+                                                            spawn_board_popup(
+                                                                0,
+                                                                "+2.000.000 đ · Qua Khởi hành"
+                                                                    .to_string(),
+                                                                true,
+                                                            );
+                                                        }
+                                                        if is_final_extra {
                                                             set_hopping_seat.set(None);
                                                             set_is_animating_move.set(false);
-                                                            set_landing_tile_burst.set(Some(10));
-                                                            set_selected_tile.set(Some(10));
+                                                            set_landing_tile_burst
+                                                                .set(Some(final_server_pos));
+                                                            set_selected_tile
+                                                                .set(Some(final_server_pos));
                                                             if let Some(snap) =
                                                                 pending_snapshot.get_untracked()
                                                             {
                                                                 set_pending_snapshot.set(None);
                                                                 commit_snapshot(snap);
                                                             }
-                                                        },
-                                                        Duration::from_millis(450),
-                                                    );
-                                                } else {
-                                                    let extra_steps = ((final_server_pos + 40
-                                                        - intermediate_tile)
-                                                        % 40)
-                                                        as u64;
-                                                    for extra in 1..=extra_steps {
-                                                        let next_t = ((intermediate_tile as u64
-                                                            + extra)
-                                                            % 40)
-                                                            as u8;
-                                                        let is_final_extra = extra == extra_steps;
-                                                        set_timeout(
-                                                            move || {
-                                                                set_visual_positions.update(
-                                                                    |positions| {
-                                                                        positions[seat_idx] =
-                                                                            next_t;
-                                                                    },
-                                                                );
-                                                                if next_t == 0 {
-                                                                    spawn_board_popup(
-                                                                        0,
-                                                                        "+2.000.000 đ · Qua Khởi hành"
-                                                                            .to_string(),
-                                                                        true,
-                                                                    );
-                                                                }
-                                                                if is_final_extra {
-                                                                    set_hopping_seat.set(None);
-                                                                    set_is_animating_move
-                                                                        .set(false);
-                                                                    set_landing_tile_burst
-                                                                        .set(Some(final_server_pos));
-                                                                    set_selected_tile
-                                                                        .set(Some(final_server_pos));
-                                                                    if let Some(snap) =
-                                                                        pending_snapshot
-                                                                            .get_untracked()
-                                                                    {
-                                                                        set_pending_snapshot
-                                                                            .set(None);
-                                                                        commit_snapshot(snap);
-                                                                    }
-                                                                }
-                                                            },
-                                                            Duration::from_millis(
-                                                                380 + extra * 75,
-                                                            ),
-                                                        );
-                                                    }
-                                                }
-                                            } else {
-                                                if let Some(TileKind::Tax(t)) = get_board()
-                                                    .get(intermediate_tile as usize)
-                                                    .map(|tile| tile.kind.clone())
-                                                {
-                                                    spawn_board_popup(
-                                                        intermediate_tile,
-                                                        format!("-{} · Nộp thuế", t.amount),
-                                                        false,
-                                                    );
-                                                }
-
-                                                set_hopping_seat.set(None);
-                                                set_is_animating_move.set(false);
-                                                if let Some(snap) = pending_snapshot.get_untracked()
-                                                {
-                                                    set_pending_snapshot.set(None);
-                                                    commit_snapshot(snap);
-                                                }
+                                                        }
+                                                    },
+                                                    Duration::from_millis(380 + extra * 75),
+                                                );
                                             }
                                         }
-                                    },
-                                    Duration::from_millis(step * 110),
-                                );
-                            }
-                        },
-                        Duration::from_millis(520),
-                    );
+                                    } else {
+                                        if let Some(TileKind::Tax(t)) = get_board()
+                                            .get(intermediate_tile as usize)
+                                            .map(|tile| tile.kind.clone())
+                                        {
+                                            spawn_board_popup(
+                                                intermediate_tile,
+                                                format!("-{} · Nộp thuế", t.amount),
+                                                false,
+                                            );
+                                        }
 
-                    let name = game_state
-                        .get_untracked()
-                        .find_player(player_id)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_else(|| "Người chơi".to_string());
-                    let doubles_str = if is_doubles {
-                        " · Xúc xắc đôi"
-                    } else {
-                        ""
-                    };
-                    add_log(format!(
-                        "{} tung ({}, {}){} · Tới ô #{}",
-                        name, dice.0, dice.1, doubles_str, new_tile_index
-                    ));
-                }
-                ServerMessage::PropertyAcquired {
-                    player_id,
-                    tile_index,
-                    cost,
-                } => {
-                    play_monopoly_sound("buy");
-                    set_recent_acquired_tile.set(Some(tile_index));
-                    set_landing_tile_burst.set(Some(tile_index));
-                    spawn_board_popup(
-                        tile_index,
-                        format!("Mua đất · -{}", cost),
-                        false,
-                    );
-                    set_timeout(
-                        move || {
-                            if recent_acquired_tile.get_untracked() == Some(tile_index) {
-                                set_recent_acquired_tile.set(None);
-                            }
-                        },
-                        Duration::from_millis(900),
-                    );
+                                        set_hopping_seat.set(None);
+                                        set_is_animating_move.set(false);
+                                        if let Some(snap) = pending_snapshot.get_untracked() {
+                                            set_pending_snapshot.set(None);
+                                            commit_snapshot(snap);
+                                        }
+                                    }
+                                }
+                            },
+                            Duration::from_millis(step * 110),
+                        );
+                    }
+                },
+                Duration::from_millis(520),
+            );
 
-                    let name = game_state
-                        .get_untracked()
-                        .find_player(player_id)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_else(|| "Người chơi".to_string());
-                    add_log(format!(
-                        "{} mua ô #{} với giá {}",
-                        name, tile_index, cost
-                    ));
-                }
-                ServerMessage::RentPaid {
-                    payer,
-                    recipient,
-                    tile_index,
-                    amount,
-                } => {
-                    let my_id_now = my_player_id.get_untracked();
-                    if my_id_now == Some(recipient) {
-                        play_monopoly_sound("cash_in");
-                    } else if my_id_now == Some(payer) {
-                        play_monopoly_sound("cash_out");
+            let name = game_state
+                .get_untracked()
+                .find_player(player_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Người chơi".to_string());
+            let doubles_str = if is_doubles {
+                " · Xúc xắc đôi"
+            } else {
+                ""
+            };
+            add_log(format!(
+                "{} tung ({}, {}){} · Tới ô #{}",
+                name, dice.0, dice.1, doubles_str, new_tile_index
+            ));
+        }
+        ServerMessage::PropertyAcquired {
+            player_id,
+            tile_index,
+            cost,
+        } => {
+            play_monopoly_sound("buy");
+            set_recent_acquired_tile.set(Some(tile_index));
+            set_landing_tile_burst.set(Some(tile_index));
+            spawn_board_popup(tile_index, format!("Mua đất · -{}", cost), false);
+            set_timeout(
+                move || {
+                    if recent_acquired_tile.get_untracked() == Some(tile_index) {
+                        set_recent_acquired_tile.set(None);
                     }
-                    spawn_board_popup(
-                        tile_index,
-                        format!("Tiền thuê · -{}", amount),
-                        false,
-                    );
-                    let p_name = game_state
-                        .get_untracked()
-                        .find_player(payer)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    let r_name = game_state
-                        .get_untracked()
-                        .find_player(recipient)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    add_log(format!(
-                        "{} trả {} tiền thuê ô #{} cho {}",
-                        p_name, amount, tile_index, r_name
-                    ));
-                }
-                ServerMessage::HouseModified {
-                    tile_index,
-                    house_count,
-                } => {
-                    play_monopoly_sound("buy");
-                    set_recent_house_tile.set(Some(tile_index));
-                    set_landing_tile_burst.set(Some(tile_index));
-                    let label = if house_count == 5 {
-                        "Nâng cấp Khách sạn".to_string()
-                    } else {
-                        format!("Cấp nhà · {} căn", house_count)
-                    };
-                    spawn_board_popup(tile_index, label.clone(), true);
-                    set_timeout(
-                        move || {
-                            if recent_house_tile.get_untracked() == Some(tile_index) {
-                                set_recent_house_tile.set(None);
-                            }
-                        },
-                        Duration::from_millis(900),
-                    );
-                    add_log(format!("Ô #{} · {}", tile_index, label));
-                }
-                ServerMessage::PropertyMortgageChanged {
-                    tile_index,
-                    is_mortgaged,
-                } => {
-                    let msg = if is_mortgaged {
-                        "Đã thế chấp ngân hàng"
-                    } else {
-                        "Đã chuộc lại tài sản"
-                    };
-                    spawn_board_popup(tile_index, msg.to_string(), is_mortgaged);
-                    add_log(format!("{} tại ô #{}", msg, tile_index));
-                }
-                ServerMessage::CardDrawn {
-                    player_id: _,
-                    deck,
-                    description,
-                    effect_summary,
-                } => {
-                    let card_tuple = (
-                        deck.clone(),
-                        description.clone(),
-                        effect_summary.clone(),
-                    );
-                    if is_rolling.get_untracked() || is_animating_move.get_untracked() {
-                        set_pending_card.set(Some(card_tuple));
-                    } else {
-                        set_drawn_card_banner.set(Some(card_tuple));
+                },
+                Duration::from_millis(900),
+            );
+
+            let name = game_state
+                .get_untracked()
+                .find_player(player_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Người chơi".to_string());
+            add_log(format!("{} mua ô #{} với giá {}", name, tile_index, cost));
+        }
+        ServerMessage::RentPaid {
+            payer,
+            recipient,
+            tile_index,
+            amount,
+        } => {
+            let my_id_now = my_player_id.get_untracked();
+            if my_id_now == Some(recipient) {
+                play_monopoly_sound("cash_in");
+            } else if my_id_now == Some(payer) {
+                play_monopoly_sound("cash_out");
+            }
+            spawn_board_popup(tile_index, format!("Tiền thuê · -{}", amount), false);
+            let p_name = game_state
+                .get_untracked()
+                .find_player(payer)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            let r_name = game_state
+                .get_untracked()
+                .find_player(recipient)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            add_log(format!(
+                "{} trả {} tiền thuê ô #{} cho {}",
+                p_name, amount, tile_index, r_name
+            ));
+        }
+        ServerMessage::HouseModified {
+            tile_index,
+            house_count,
+        } => {
+            play_monopoly_sound("buy");
+            set_recent_house_tile.set(Some(tile_index));
+            set_landing_tile_burst.set(Some(tile_index));
+            let label = if house_count == 5 {
+                "Nâng cấp Khách sạn".to_string()
+            } else {
+                format!("Cấp nhà · {} căn", house_count)
+            };
+            spawn_board_popup(tile_index, label.clone(), true);
+            set_timeout(
+                move || {
+                    if recent_house_tile.get_untracked() == Some(tile_index) {
+                        set_recent_house_tile.set(None);
                     }
-                    add_log(format!(
-                        "[{}] {}: {}",
-                        deck, description, effect_summary
-                    ));
-                }
-                ServerMessage::BotAssumedControl { player_id, reason } => {
-                    let name = game_state
-                        .get_untracked()
-                        .find_player(player_id)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    add_log(format!(
-                        "Hệ thống tự động đi thay lượt của {} ({})",
-                        name, reason
-                    ));
-                }
-                ServerMessage::SyncSnapshot { state } => {
-                    if let Ok(parsed) = serde_json::from_value::<GameState>(state) {
-                        if is_rolling.get_untracked() || is_animating_move.get_untracked() {
-                            set_pending_snapshot.set(Some(parsed));
-                        } else {
-                            let mut pos_arr = visual_positions.get_untracked();
-                            for (i, p) in parsed.players.iter().enumerate().take(4) {
-                                pos_arr[i] = p.position;
-                            }
-                            set_visual_positions.set(pos_arr);
-                            set_display_dice.set(parsed.last_dice);
-                            commit_snapshot(parsed);
-                        }
+                },
+                Duration::from_millis(900),
+            );
+            add_log(format!("Ô #{} · {}", tile_index, label));
+        }
+        ServerMessage::PropertyMortgageChanged {
+            tile_index,
+            is_mortgaged,
+        } => {
+            let msg = if is_mortgaged {
+                "Đã thế chấp ngân hàng"
+            } else {
+                "Đã chuộc lại tài sản"
+            };
+            spawn_board_popup(tile_index, msg.to_string(), is_mortgaged);
+            add_log(format!("{} tại ô #{}", msg, tile_index));
+        }
+        ServerMessage::CardDrawn {
+            player_id: _,
+            deck,
+            description,
+            effect_summary,
+        } => {
+            let card_tuple = (deck.clone(), description.clone(), effect_summary.clone());
+            if is_rolling.get_untracked() || is_animating_move.get_untracked() {
+                set_pending_card.set(Some(card_tuple));
+            } else {
+                set_drawn_card_banner.set(Some(card_tuple));
+            }
+            add_log(format!("[{}] {}: {}", deck, description, effect_summary));
+        }
+        ServerMessage::BotAssumedControl { player_id, reason } => {
+            let name = game_state
+                .get_untracked()
+                .find_player(player_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            add_log(format!(
+                "Hệ thống tự động đi thay lượt của {} ({})",
+                name, reason
+            ));
+        }
+        ServerMessage::SyncSnapshot { state } => {
+            if let Ok(parsed) = serde_json::from_value::<GameState>(state) {
+                if is_rolling.get_untracked() || is_animating_move.get_untracked() {
+                    set_pending_snapshot.set(Some(parsed));
+                } else {
+                    let mut pos_arr = visual_positions.get_untracked();
+                    for (i, p) in parsed.players.iter().enumerate().take(4) {
+                        pos_arr[i] = p.position;
                     }
+                    set_visual_positions.set(pos_arr);
+                    set_display_dice.set(parsed.last_dice);
+                    commit_snapshot(parsed);
                 }
-                ServerMessage::ActionRejected { reason } => {
-                    set_is_rolling.set(false);
-                    set_is_animating_move.set(false);
-                    set_hopping_seat.set(None);
-                    set_error_toast.set(Some(reason.clone()));
-                    add_log(format!("Thao tác bị từ chối: {}", reason));
-                }
-                ServerMessage::PlayerBankrupt { player_id } => {
-                    let name = game_state
-                        .get_untracked()
-                        .find_player(player_id)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    add_log(format!("{} đã phá sản", name));
-                }
-                _ => {}
+            }
+        }
+        ServerMessage::ActionRejected { reason } => {
+            set_is_rolling.set(false);
+            set_is_animating_move.set(false);
+            set_hopping_seat.set(None);
+            set_error_toast.set(Some(reason.clone()));
+            add_log(format!("Thao tác bị từ chối: {}", reason));
+        }
+        ServerMessage::PlayerBankrupt { player_id } => {
+            let name = game_state
+                .get_untracked()
+                .find_player(player_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            add_log(format!("{} đã phá sản", name));
+        }
+        _ => {}
     });
 
     let start_local_game_custom = move |slots: Vec<LocalPlayerSlot>| {
@@ -1088,7 +1052,10 @@ pub fn App() -> impl IntoView {
             return;
         }
         if key == " " && view_mode.get_untracked() == ViewMode::Game {
-            if let Some(target) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok()) {
+            if let Some(target) = ev
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+            {
                 let tag = target.tag_name();
                 if tag == "INPUT" || tag == "TEXTAREA" || tag == "BUTTON" {
                     return;

@@ -77,9 +77,7 @@ pub fn apply_action(
 
     // Verify current player for turn-based actions
     match action {
-        ClientMessage::JoinRoom { .. }
-        | ClientMessage::StartGame
-        | ClientMessage::AddBot => {
+        ClientMessage::JoinRoom { .. } | ClientMessage::StartGame | ClientMessage::AddBot => {
             return Err(GameRuleError::InvalidAction(
                 "Game already in progress".to_string(),
             ));
