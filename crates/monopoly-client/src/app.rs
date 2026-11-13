@@ -38,6 +38,71 @@ pub enum LobbyTab {
     Local,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum UiTemplate {
+    Classic,
+    GachBong,
+}
+
+impl UiTemplate {
+    fn as_str(self) -> &'static str {
+        match self {
+            UiTemplate::Classic => "classic",
+            UiTemplate::GachBong => "gachbong",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            UiTemplate::Classic => "Mặc định",
+            UiTemplate::GachBong => "Gạch bông & Bảng hiệu",
+        }
+    }
+
+    fn toggle(self) -> Self {
+        match self {
+            UiTemplate::Classic => UiTemplate::GachBong,
+            UiTemplate::GachBong => UiTemplate::Classic,
+        }
+    }
+}
+
+fn load_ui_template() -> UiTemplate {
+    let Some(win) = web_sys::window() else {
+        return UiTemplate::Classic;
+    };
+    let Ok(Some(storage)) = win.local_storage() else {
+        return UiTemplate::Classic;
+    };
+    match storage
+        .get_item("monopoly_ui_template")
+        .ok()
+        .flatten()
+        .as_deref()
+    {
+        Some("gachbong") => UiTemplate::GachBong,
+        _ => UiTemplate::Classic,
+    }
+}
+
+fn save_ui_template(template: UiTemplate) {
+    if let Some(win) = web_sys::window() {
+        if let Ok(Some(storage)) = win.local_storage() {
+            let _ = storage.set_item("monopoly_ui_template", template.as_str());
+        }
+    }
+}
+
+fn apply_ui_template_to_dom(template: UiTemplate) {
+    if let Some(win) = web_sys::window() {
+        if let Some(doc) = win.document() {
+            if let Some(root) = doc.document_element() {
+                let _ = root.set_attribute("data-template", template.as_str());
+            }
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct LocalPlayerSlot {
     pub name: String,
@@ -339,6 +404,13 @@ pub fn App() -> impl IntoView {
     let (show_rules, set_show_rules) = create_signal(false);
     let (selected_tile, set_selected_tile) = create_signal::<Option<u8>>(None);
     let (sound_muted, set_sound_muted) = create_signal(false);
+    let (ui_template, set_ui_template) = create_signal(load_ui_template());
+
+    create_effect(move |_| {
+        let tpl = ui_template.get();
+        apply_ui_template_to_dom(tpl);
+        save_ui_template(tpl);
+    });
 
     // Animation signals for sequenced dice tumble, step-by-step pawn hopping, trail, and popups
     let (is_rolling, set_is_rolling) = create_signal(false);
@@ -1115,6 +1187,24 @@ pub fn App() -> impl IntoView {
                             "font-size: 12px; line-height: 16px; height: 32px; background: {}; color: {}; border: 1px solid {}; padding: 0 10px; border-radius: 8px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;",
                             BG_SECONDARY, TEXT_PRIMARY, BORDER_DEFAULT
                         )
+                        title="Đổi giao diện bàn cờ"
+                        on:click=move |_| set_ui_template.update(|t| *t = t.toggle())
+                    >
+                        <span style=move || {
+                            if ui_template.get() == UiTemplate::GachBong {
+                                "width: 9px; height: 9px; border-radius: 50%; background: #e3a72f; border: 1px solid #c8372d; display: inline-block; flex-shrink: 0;"
+                            } else {
+                                "width: 9px; height: 9px; border-radius: 50%; background: #8fb8de; border: 1px solid #d9383a; display: inline-block; flex-shrink: 0;"
+                            }
+                        }></span>
+                        <span>{move || format!("Giao diện: {}", ui_template.get().label())}</span>
+                    </button>
+                    <button
+                        class="btn-outline"
+                        style=format!(
+                            "font-size: 12px; line-height: 16px; height: 32px; background: {}; color: {}; border: 1px solid {}; padding: 0 10px; border-radius: 8px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;",
+                            BG_SECONDARY, TEXT_PRIMARY, BORDER_DEFAULT
+                        )
                         on:click=move |_| set_show_rules.update(|v| *v = !*v)
                     >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1239,7 +1329,7 @@ pub fn App() -> impl IntoView {
                             <div class="lobby-shell">
                                 <div class="lobby-grid lobby-card-enter">
                                     <div style="display: flex; flex-direction: column; gap: 24px;">
-                                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                                        <div class="lobby-hero" style="display: flex; flex-direction: column; gap: 12px;">
                                             <div style="display: inline-flex; align-items: center; gap: 8px;">
                                                 <span style=format!("width: 6px; height: 6px; border-radius: 50%; background: {};", STATUS_WARNING)></span>
                                                 <span class="mono" style=format!("font-size: 12px; line-height: 16px; color: {};", TEXT_MUTED)>
@@ -1254,7 +1344,44 @@ pub fn App() -> impl IntoView {
                                             </p>
                                         </div>
 
-                                        <div class="panel" style="padding: 24px; gap: 16px;">
+                                        <div class="panel lobby-form-card" style="padding: 24px; gap: 16px;">
+                                            <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                <span style=format!("font-size: 12px; line-height: 16px; font-weight: 600; color: {};", TEXT_SECONDARY)>
+                                                    "Chọn giao diện (Template)"
+                                                </span>
+                                                <div class="template-picker">
+                                                    <button
+                                                        type="button"
+                                                        class=move || if ui_template.get() == UiTemplate::Classic { "template-option active" } else { "template-option" }
+                                                        on:click=move |_| set_ui_template.set(UiTemplate::Classic)
+                                                    >
+                                                        <span class="template-swatch">
+                                                            <span style="background: #161513;"></span>
+                                                            <span style="background: #8fb8de;"></span>
+                                                            <span style="background: #d9383a;"></span>
+                                                        </span>
+                                                        <div style="display: flex; flex-direction: column; gap: 1px;">
+                                                            <span style="font-size: 13px; font-weight: 600; line-height: 16px;">"Mặc định"</span>
+                                                            <span style=format!("font-size: 11px; color: {}; line-height: 14px;", TEXT_MUTED)>"Hiện đại · Tối"</span>
+                                                        </div>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class=move || if ui_template.get() == UiTemplate::GachBong { "template-option active" } else { "template-option" }
+                                                        on:click=move |_| set_ui_template.set(UiTemplate::GachBong)
+                                                    >
+                                                        <span class="template-swatch">
+                                                            <span style="background: #123430;"></span>
+                                                            <span style="background: #f4ead6;"></span>
+                                                            <span style="background: #e3a72f;"></span>
+                                                        </span>
+                                                        <div style="display: flex; flex-direction: column; gap: 1px;">
+                                                            <span style="font-size: 13px; font-weight: 600; line-height: 16px;">"Gạch bông"</span>
+                                                            <span style=format!("font-size: 11px; color: {}; line-height: 14px;", TEXT_MUTED)>"Sài Gòn · Bảng hiệu"</span>
+                                                        </div>
+                                                    </button>
+                                                </div>
+                                            </div>
                                             <div class="lobby-tabs">
                                                 <button
                                                     class=move || if lobby_tab.get() == LobbyTab::Online { "lobby-tab active" } else { "lobby-tab" }
