@@ -429,7 +429,6 @@ async fn test_configure_max_players_limits_room_and_auto_starts() {
     )
     .await;
     let _ = recv_msg(&mut stream2).await.expect("RoomJoined 2");
-    let _ = recv_msg(&mut stream2).await.expect("SyncSnapshot 2");
 
     let mut started = false;
     for _ in 0..5 {

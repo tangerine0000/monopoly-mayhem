@@ -136,7 +136,7 @@ async fn handle_socket(socket: WebSocket, room_tx: mpsc::Sender<RoomCommand>) {
         }
     };
 
-    let (client_tx, mut client_rx) = mpsc::channel::<ServerMessage>(64);
+    let (client_tx, mut client_rx) = mpsc::channel::<Arc<String>>(64);
     let (reply_tx, reply_rx) = oneshot::channel();
 
     let connect_cmd = RoomCommand::ConnectClient {
@@ -164,13 +164,11 @@ async fn handle_socket(socket: WebSocket, room_tx: mpsc::Sender<RoomCommand>) {
 
     info!("Client joined: {}", player_id);
 
-    // 2. Spawn pump from ServerMessage channel to WebSocket Sink
+    // 2. Spawn pump from pre-serialized message channel to WebSocket Sink
     let mut send_task = tokio::spawn(async move {
-        while let Some(msg) = client_rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&msg) {
-                if ws_sink.send(Message::Text(json)).await.is_err() {
-                    break;
-                }
+        while let Some(json) = client_rx.recv().await {
+            if ws_sink.send(Message::Text((*json).clone())).await.is_err() {
+                break;
             }
         }
     });

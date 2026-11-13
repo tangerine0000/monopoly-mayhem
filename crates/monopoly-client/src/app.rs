@@ -1820,6 +1820,17 @@ pub fn App() -> impl IntoView {
                                     }
                                     let cur_id = st.current_player().map(|p| p.id);
                                     let my_id = my_player_id.get();
+                                    let board_tiles = get_board();
+                                    let all_districts = [
+                                        District::District4,
+                                        District::District8,
+                                        District::PhuNhuan,
+                                        District::TanBinh,
+                                        District::District5,
+                                        District::District3,
+                                        District::District2,
+                                        District::District1,
+                                    ];
                                     view! {
                                         <div class="standings-strip">
                                             {st.players.iter().enumerate().map(|(idx, p)| {
@@ -1844,17 +1855,6 @@ pub fn App() -> impl IntoView {
                                                     ""
                                                 };
 
-                                                let all_districts = [
-                                                    District::District4,
-                                                    District::District8,
-                                                    District::PhuNhuan,
-                                                    District::TanBinh,
-                                                    District::District5,
-                                                    District::District3,
-                                                    District::District2,
-                                                    District::District1,
-                                                ];
-                                                let board_tiles = get_board();
                                                 let owned_districts: Vec<(District, bool)> = all_districts
                                                     .into_iter()
                                                     .filter_map(|d| {
@@ -2171,28 +2171,31 @@ pub fn App() -> impl IntoView {
                                         }
 
                                         if !local_mode && st.is_game_started && !st.is_game_over {
-                                            let t_sec = timer_seconds.get();
-                                            let mins = t_sec / 60;
-                                            let secs = t_sec % 60;
-                                            let is_urgent = t_sec <= 30;
-                                            let t_col = if is_urgent { STATUS_DANGER } else { TEXT_SECONDARY };
-                                            let label = if is_urgent && is_my_turn {
-                                                format!("Còn {}s!", t_sec)
-                                            } else {
-                                                format!("{}:{:02}", mins, secs)
-                                            };
                                             context_buttons.push(view! {
                                                 <span
                                                     class="mono"
-                                                    style=format!(
-                                                        "font-size: 12px; font-weight: 600; color: {}; padding: {}; border-radius: 999px; background: {}; border: 1px solid {};",
-                                                        t_col,
-                                                        if is_urgent && is_my_turn { "4px 10px" } else { "0 4px" },
-                                                        if is_urgent && is_my_turn { "rgba(229, 72, 77, 0.16)" } else { "transparent" },
-                                                        if is_urgent && is_my_turn { STATUS_DANGER } else { "transparent" }
-                                                    )
+                                                    style=move || {
+                                                        let t_sec = timer_seconds.get();
+                                                        let is_urgent = t_sec <= 30;
+                                                        let t_col = if is_urgent { STATUS_DANGER } else { TEXT_SECONDARY };
+                                                        format!(
+                                                            "font-size: 12px; font-weight: 600; color: {}; padding: {}; border-radius: 999px; background: {}; border: 1px solid {};",
+                                                            t_col,
+                                                            if is_urgent && is_my_turn { "4px 10px" } else { "0 4px" },
+                                                            if is_urgent && is_my_turn { "rgba(229, 72, 77, 0.16)" } else { "transparent" },
+                                                            if is_urgent && is_my_turn { STATUS_DANGER } else { "transparent" }
+                                                        )
+                                                    }
                                                 >
-                                                    {label}
+                                                    {move || {
+                                                        let t_sec = timer_seconds.get();
+                                                        let is_urgent = t_sec <= 30;
+                                                        if is_urgent && is_my_turn {
+                                                            format!("Còn {}s!", t_sec)
+                                                        } else {
+                                                            format!("{}:{:02}", t_sec / 60, t_sec % 60)
+                                                        }
+                                                    }}
                                                 </span>
                                             }.into_view());
                                         }
