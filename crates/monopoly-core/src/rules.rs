@@ -671,8 +671,15 @@ pub fn apply_action(
                 advance_turn(&mut new_state, &mut events);
             }
         }
-        ClientMessage::ConfigureGame { enable_auction } => {
+        ClientMessage::ConfigureGame {
+            enable_auction,
+            max_players,
+        } => {
             new_state.config.enable_auction = *enable_auction;
+            if let Some(mp) = max_players {
+                let min_allowed = new_state.players.len().max(2) as u8;
+                new_state.config.max_players = (*mp).clamp(2, 4).max(min_allowed);
+            }
             if !*enable_auction && new_state.turn_phase == TurnPhase::Auction {
                 new_state.auction = None;
                 new_state.turn_phase = TurnPhase::TurnEnded;

@@ -1,7 +1,7 @@
 use crate::palette::{
     get_district_color, get_district_label, BOARD_CENTER_BG, BOARD_CENTER_BORDER, BOARD_OUTER_BG,
-    PLAYER_COLORS, STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_PANEL, TEXT_MUTED,
-    TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHANCE_BG,
+    BORDER_DEFAULT, PLAYER_COLORS, STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_PANEL,
+    TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHANCE_BG,
     TILE_CHANCE_BORDER, TILE_CHANCE_INNER_BG, TILE_CHEST, TILE_CHEST_BG, TILE_CHEST_BORDER,
     TILE_CHEST_INNER_BG, TILE_CORNER_ACCENT, TILE_CORNER_BG, TILE_SELECTED_STROKE, TILE_STATION,
     TILE_STROKE, TILE_TAX, TILE_TEXT_MUTED, TILE_TEXT_PRIMARY, TILE_UTILITY,
@@ -563,29 +563,6 @@ pub fn Board(
 
                 // Center Board Stage (Drawn Card, Buy Decision, Auction, Waiting Status)
                 {move || {
-                    if let Some((deck_name, card_title, card_desc)) = drawn_card_banner.get() {
-                        let is_chance = deck_name.contains("Cơ Hội");
-                        let cls = if is_chance { "stage-drawn-card chance" } else { "stage-drawn-card chest" };
-                        let deck_label = if is_chance { "Thẻ Cơ hội" } else { "Thẻ Khí vận" };
-                        return view! {
-                            <div class="board-center-stage">
-                                <div class=cls>
-                                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                                        <span class="mono" style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85;">
-                                            {deck_label}
-                                        </span>
-                                    </div>
-                                    <div style="font-size: 16px; line-height: 21px; font-weight: 700;">
-                                        {card_title}
-                                    </div>
-                                    <div style="font-size: 13px; line-height: 18px; font-weight: 500; opacity: 0.92;">
-                                        {card_desc}
-                                    </div>
-                                </div>
-                            </div>
-                        }.into_view();
-                    }
-
                     let st = state.get();
                     if !st.is_game_started || st.is_game_over {
                         return view! {}.into_view();
@@ -599,6 +576,33 @@ pub fn Board(
                     let my_id = my_player_id.get();
                     let is_my_turn = my_id.is_some() && st.current_player().map(|p| p.id) == my_id;
                     let me_opt = my_id.and_then(|id| st.find_player(id));
+                    let has_urgent_decision = st.turn_phase == TurnPhase::Auction
+                        || (is_my_turn && st.turn_phase == TurnPhase::TileActionPending);
+
+                    if !has_urgent_decision {
+                        if let Some((deck_name, card_title, card_desc)) = drawn_card_banner.get() {
+                            let is_chance = deck_name.contains("Cơ Hội");
+                            let cls = if is_chance { "stage-drawn-card chance" } else { "stage-drawn-card chest" };
+                            let deck_label = if is_chance { "Thẻ Cơ hội" } else { "Thẻ Khí vận" };
+                            return view! {
+                                <div class="board-center-stage">
+                                    <div class=cls>
+                                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <span class="mono" style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85;">
+                                                {deck_label}
+                                            </span>
+                                        </div>
+                                        <div style="font-size: 16px; line-height: 21px; font-weight: 700;">
+                                            {card_title}
+                                        </div>
+                                        <div style="font-size: 13px; line-height: 18px; font-weight: 500; opacity: 0.92;">
+                                            {card_desc}
+                                        </div>
+                                    </div>
+                                </div>
+                            }.into_view();
+                        }
+                    }
 
                     // Auction Center Stage
                     if st.turn_phase == TurnPhase::Auction {
@@ -888,9 +892,9 @@ pub fn Board(
             <svg class="board-svg" viewBox="0 0 1280 960" preserveAspectRatio="xMidYMid meet">
                 <defs>
                     <linearGradient id="boardCenterGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stop-color="#e5f4ee" />
+                        <stop offset="0%" stop-color="var(--board-center-grad-start, #e5f4ee)" />
                         <stop offset="55%" stop-color=BOARD_CENTER_BG />
-                        <stop offset="100%" stop-color="#cee6de" />
+                        <stop offset="100%" stop-color="var(--board-center-grad-end, #cee6de)" />
                     </linearGradient>
                     <linearGradient id="goldFrameGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                         <stop offset="0%" stop-color="#e6c478" />
@@ -1134,7 +1138,7 @@ pub fn Board(
                                 font-size="11.5"
                                 font-weight="500"
                                 font-family="'Roboto Mono', monospace"
-                                fill=if is_doubles { STATUS_WARNING } else { TEXT_PRIMARY }
+                                fill=if is_doubles { STATUS_WARNING } else { "#fbf7ee" }
                                 text-anchor="middle"
                             >
                                 {if rolling {
@@ -1664,7 +1668,7 @@ pub fn Board(
                                         let (eff_txt, is_pos) = format_card_effect(&card.effect);
                                         let eff_col = if is_pos { STATUS_SUCCESS } else { STATUS_DANGER };
                                         view! {
-                                            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid rgba(239, 233, 222, 0.06);">
+                                            <div style=format!("display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid {};", BORDER_DEFAULT)>
                                                 <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
                                                     <span style=format!("font-size: 13px; font-weight: 600; color: {};", TEXT_PRIMARY)>
                                                         {card.title}

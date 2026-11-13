@@ -325,3 +325,122 @@ async fn test_host_add_bot_and_start_game() {
     }
     assert!(started, "Host + Bot should start game with 2 players");
 }
+
+#[tokio::test]
+async fn test_multiple_rooms_separated_by_room_code() {
+    let server = TestServer::spawn().await;
+
+    // Connect Player A1 to ROOM-ALPHA (lowercase should normalize to ROOM-ALPHA)
+    let (mut sink_a1, mut stream_a1) = server.connect_ws("room-alpha").await;
+    send_json(
+        &mut sink_a1,
+        &ClientMessage::JoinRoom {
+            player_name: "Alice".to_string(),
+            session_token: None,
+        },
+    )
+    .await;
+    match recv_msg(&mut stream_a1).await.expect("RoomJoined A1") {
+        ServerMessage::RoomJoined {
+            room_id,
+            seat_index,
+            ..
+        } => {
+            assert_eq!(room_id.0, "ROOM-ALPHA");
+            assert_eq!(seat_index, 0);
+        }
+        other => panic!("Expected RoomJoined, got {:?}", other),
+    }
+    let _ = recv_msg(&mut stream_a1).await.expect("SyncSnapshot A1");
+
+    // Connect Player B1 to ROOM-BETA
+    let (mut sink_b1, mut stream_b1) = server.connect_ws("ROOM-BETA").await;
+    send_json(
+        &mut sink_b1,
+        &ClientMessage::JoinRoom {
+            player_name: "Bob".to_string(),
+            session_token: None,
+        },
+    )
+    .await;
+    match recv_msg(&mut stream_b1).await.expect("RoomJoined B1") {
+        ServerMessage::RoomJoined {
+            room_id,
+            seat_index,
+            ..
+        } => {
+            assert_eq!(room_id.0, "ROOM-BETA");
+            assert_eq!(seat_index, 0);
+        }
+        other => panic!("Expected RoomJoined, got {:?}", other),
+    }
+    match recv_msg(&mut stream_b1).await.expect("SyncSnapshot B1") {
+        ServerMessage::SyncSnapshot { state } => {
+            let players = state["players"].as_array().unwrap();
+            assert_eq!(players.len(), 1);
+            assert_eq!(players[0]["name"], "Bob");
+        }
+        other => panic!("Expected SyncSnapshot, got {:?}", other),
+    }
+
+    assert!(server.state.registry.contains_key("ROOM-ALPHA"));
+    assert!(server.state.registry.contains_key("ROOM-BETA"));
+}
+
+#[tokio::test]
+async fn test_configure_max_players_limits_room_and_auto_starts() {
+    let server = TestServer::spawn().await;
+
+    let (mut sink1, mut stream1) = server.connect_ws("SGN-MAX2").await;
+    send_json(
+        &mut sink1,
+        &ClientMessage::JoinRoom {
+            player_name: "Host".to_string(),
+            session_token: None,
+        },
+    )
+    .await;
+    let _ = recv_msg(&mut stream1).await.expect("RoomJoined 1");
+    let _ = recv_msg(&mut stream1).await.expect("SyncSnapshot 1");
+
+    send_json(
+        &mut sink1,
+        &ClientMessage::ConfigureGame {
+            enable_auction: true,
+            max_players: Some(2),
+        },
+    )
+    .await;
+    match recv_msg(&mut stream1).await.expect("SyncSnapshot cfg") {
+        ServerMessage::SyncSnapshot { state } => {
+            assert_eq!(state["config"]["max_players"], 2);
+        }
+        other => panic!("Expected SyncSnapshot, got {:?}", other),
+    }
+
+    // Second player joins -> room reaches max_players (2) and auto-starts
+    let (mut sink2, mut stream2) = server.connect_ws("SGN-MAX2").await;
+    send_json(
+        &mut sink2,
+        &ClientMessage::JoinRoom {
+            player_name: "Guest".to_string(),
+            session_token: None,
+        },
+    )
+    .await;
+    let _ = recv_msg(&mut stream2).await.expect("RoomJoined 2");
+    let _ = recv_msg(&mut stream2).await.expect("SyncSnapshot 2");
+
+    let mut started = false;
+    for _ in 0..5 {
+        if let Some(ServerMessage::GameStarted { turn_order }) = recv_msg(&mut stream2).await {
+            assert_eq!(turn_order.len(), 2);
+            started = true;
+            break;
+        }
+    }
+    assert!(
+        started,
+        "Room configured for 2 players should auto-start when 2nd joins"
+    );
+}

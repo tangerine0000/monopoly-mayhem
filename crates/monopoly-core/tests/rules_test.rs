@@ -309,6 +309,7 @@ fn test_decline_property_respects_auction_config_option() {
         p1_id,
         &ClientMessage::ConfigureGame {
             enable_auction: false,
+            max_players: None,
         },
         &mut rng,
     )
