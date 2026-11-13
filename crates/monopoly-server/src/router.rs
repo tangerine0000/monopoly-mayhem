@@ -90,7 +90,13 @@ async fn ws_upgrade(
     State(state): State<AppState>,
 ) -> Response {
     let room_id = match query.room {
-        Some(r) => r,
+        Some(r) => {
+            let normalized = r.trim().to_uppercase();
+            if normalized.is_empty() {
+                return (StatusCode::BAD_REQUEST, "Empty 'room' query parameter").into_response();
+            }
+            normalized
+        }
         None => return (StatusCode::BAD_REQUEST, "Missing 'room' query parameter").into_response(),
     };
 

@@ -30,7 +30,6 @@ impl WsClient {
         ws_url: String,
         room_id: String,
         player_name: String,
-        enable_auction: bool,
         on_message: impl Fn(ServerMessage) + 'static,
         on_close: impl Fn() + 'static,
     ) -> Result<Self, String> {
@@ -41,7 +40,7 @@ impl WsClient {
         let write_clone = write_mutex.clone();
         let saved_token = get_storage_session_token(&room_id);
 
-        // Send initial JoinRoom message followed by initial game configuration
+        // Send initial JoinRoom message
         spawn_local(async move {
             let join_msg = ClientMessage::JoinRoom {
                 player_name,
@@ -50,10 +49,6 @@ impl WsClient {
             let mut guard = write_clone.lock().await;
             if let Ok(json) = serde_json::to_string(&join_msg) {
                 let _ = guard.send(Message::Text(json)).await;
-            }
-            let cfg_msg = ClientMessage::ConfigureGame { enable_auction };
-            if let Ok(cfg_json) = serde_json::to_string(&cfg_msg) {
-                let _ = guard.send(Message::Text(cfg_json)).await;
             }
         });
 

@@ -1,11 +1,10 @@
 use crate::components::board::{Board, BoardFloatingPopup, PlayerAvatar};
 use crate::components::log::LogFeed;
 use crate::palette::{
-    get_district_color, ACCENT_PRIMARY, BG_SECONDARY, BORDER_DEFAULT, DISTRICT_1_DARK_BLUE,
-    STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_HOVER, TEXT_MUTED, TEXT_PRIMARY,
-    TEXT_SECONDARY,
+    get_district_color, ACCENT_PRIMARY, BG_SECONDARY, BORDER_DEFAULT, STATUS_DANGER,
+    STATUS_SUCCESS, STATUS_WARNING, SURFACE_HOVER, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
 };
-use crate::ws::{save_storage_session_token, WsClient};
+use crate::ws::{get_storage_session_token, save_storage_session_token, WsClient};
 use leptos::*;
 use monopoly_core::board::{get_board, District, TileKind};
 use monopoly_core::money::Money;
@@ -15,7 +14,6 @@ use monopoly_proto::{ClientMessage, PlayerId, ServerMessage};
 use std::rc::Rc;
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::spawn_local;
 
 #[wasm_bindgen]
 extern "C" {
@@ -393,9 +391,20 @@ pub fn App() -> impl IntoView {
             is_bot: false,
         },
     ]);
-    let (player_name, set_player_name) = create_signal("Nguyễn Minh".to_string());
-    let (room_id, set_room_id) = create_signal("SGN-888".to_string());
+    let generate_random_room_code = || -> String {
+        format!(
+            "SGN-{}",
+            uuid::Uuid::new_v4().to_string()[..4].to_uppercase()
+        )
+    };
+    let (player_name, set_player_name) = create_signal(String::new());
+    let (room_id, set_room_id) = create_signal(generate_random_room_code());
     let (enable_auction_config, set_enable_auction_config) = create_signal(false);
+    let (online_max_players, set_online_max_players) = create_signal(4u8);
+    let (online_add_bots, set_online_add_bots) = create_signal(false);
+    let (online_bot_count, set_online_bot_count) = create_signal(1u8);
+    let (pending_host_setup, set_pending_host_setup) =
+        create_signal::<Option<(bool, u8, u8)>>(None);
     let (game_state, set_game_state) = create_signal(GameState::new());
     let (my_player_id, set_my_player_id) = create_signal::<Option<PlayerId>>(None);
     let (timer_seconds, set_timer_seconds) = create_signal(120u32);
@@ -428,6 +437,7 @@ pub fn App() -> impl IntoView {
     let (cash_delta_badge, set_cash_delta_badge) = create_signal::<Option<(String, bool)>>(None);
     let (drawn_card_banner, set_drawn_card_banner) =
         create_signal::<Option<(String, String, String)>>(None);
+    let (card_banner_seq, set_card_banner_seq) = create_signal(0u64);
 
     // Buffered state/card while dice tumble & pawn hops so UI updates right when landing
     let (pending_snapshot, set_pending_snapshot) = create_signal::<Option<GameState>>(None);
@@ -489,6 +499,20 @@ pub fn App() -> impl IntoView {
         set_game_state.set(new_state);
     };
 
+    let show_drawn_card_banner = move |card_tuple: (String, String, String)| {
+        let next_seq = card_banner_seq.get_untracked().wrapping_add(1);
+        set_card_banner_seq.set(next_seq);
+        set_drawn_card_banner.set(Some(card_tuple));
+        set_timeout(
+            move || {
+                if card_banner_seq.get_untracked() == next_seq {
+                    set_drawn_card_banner.set(None);
+                }
+            },
+            Duration::from_millis(4000),
+        );
+    };
+
     let (is_local_mode, set_is_local_mode) = create_signal(false);
     let (local_authoritative_state, set_local_authoritative_state) =
         create_signal(GameState::new());
@@ -502,6 +526,24 @@ pub fn App() -> impl IntoView {
         } => {
             set_my_player_id.set(Some(player_id));
             save_storage_session_token(&joined_room.0, &session_token);
+            if seat_index == 0 {
+                if let Some((enable_auction, max_players, bot_count)) =
+                    pending_host_setup.get_untracked()
+                {
+                    set_pending_host_setup.set(None);
+                    if let Some(client) = ws_client.get_untracked() {
+                        client.send(ClientMessage::ConfigureGame {
+                            enable_auction,
+                            max_players: Some(max_players),
+                        });
+                        for _ in 0..bot_count {
+                            client.send(ClientMessage::AddBot);
+                        }
+                    }
+                }
+            } else {
+                set_pending_host_setup.set(None);
+            }
             add_log(format!(
                 "Đã vào phòng {} tại vị trí T{}",
                 joined_room.0,
@@ -553,6 +595,7 @@ pub fn App() -> impl IntoView {
             is_doubles,
         } => {
             play_monopoly_sound("roll");
+            set_selected_tile.set(None);
             set_drawn_card_banner.set(None);
             set_pending_card.set(None);
             set_landing_tile_burst.set(None);
@@ -590,7 +633,6 @@ pub fn App() -> impl IntoView {
 
                     if steps == 0 {
                         set_landing_tile_burst.set(Some(new_tile_index));
-                        set_selected_tile.set(Some(new_tile_index));
                         set_hopping_seat.set(None);
                         set_is_animating_move.set(false);
                         if let Some(snap) = pending_snapshot.get_untracked() {
@@ -627,11 +669,10 @@ pub fn App() -> impl IntoView {
                                 if is_last_step {
                                     set_step_trail.set(Vec::new());
                                     set_landing_tile_burst.set(Some(new_tile_index));
-                                    set_selected_tile.set(Some(new_tile_index));
 
                                     if let Some(card_info) = pending_card.get_untracked() {
                                         set_pending_card.set(None);
-                                        set_drawn_card_banner.set(Some(card_info));
+                                        show_drawn_card_banner(card_info);
                                         spawn_board_popup(
                                             new_tile_index,
                                             "Rút thẻ sự kiện".to_string(),
@@ -663,7 +704,6 @@ pub fn App() -> impl IntoView {
                                                     set_hopping_seat.set(None);
                                                     set_is_animating_move.set(false);
                                                     set_landing_tile_burst.set(Some(10));
-                                                    set_selected_tile.set(Some(10));
                                                     if let Some(snap) =
                                                         pending_snapshot.get_untracked()
                                                     {
@@ -698,8 +738,6 @@ pub fn App() -> impl IntoView {
                                                             set_hopping_seat.set(None);
                                                             set_is_animating_move.set(false);
                                                             set_landing_tile_burst
-                                                                .set(Some(final_server_pos));
-                                                            set_selected_tile
                                                                 .set(Some(final_server_pos));
                                                             if let Some(snap) =
                                                                 pending_snapshot.get_untracked()
@@ -854,7 +892,7 @@ pub fn App() -> impl IntoView {
             if is_rolling.get_untracked() || is_animating_move.get_untracked() {
                 set_pending_card.set(Some(card_tuple));
             } else {
-                set_drawn_card_banner.set(Some(card_tuple));
+                show_drawn_card_banner(card_tuple);
             }
             add_log(format!("[{}] {}: {}", deck, description, effect_summary));
         }
@@ -1008,10 +1046,34 @@ pub fn App() -> impl IntoView {
         start_local_game_custom(slots);
     };
 
-    let connect_to_room = move |target_room: String, name: String, auction_enabled: bool| {
+    let connect_to_room = move |target_room: String,
+                                name: String,
+                                auction_enabled: bool,
+                                max_players: u8,
+                                bot_count: u8| {
+        let trimmed_name = name.trim().to_string();
+        if trimmed_name.is_empty() {
+            set_error_toast.set(Some("Vui lòng nhập tên người chơi".to_string()));
+            return;
+        }
+        let normalized_room = target_room.trim().to_uppercase();
+        if normalized_room.is_empty() {
+            set_error_toast.set(Some("Vui lòng nhập mã phòng".to_string()));
+            return;
+        }
+
         set_is_local_mode.set(false);
         set_my_player_id.set(None);
-        set_room_id.set(target_room.clone());
+        set_room_id.set(normalized_room.clone());
+
+        let has_saved_session = get_storage_session_token(&normalized_room).is_some();
+        if !has_saved_session {
+            let clamped_max = max_players.clamp(2, 4);
+            let clamped_bots = bot_count.min(clamped_max.saturating_sub(1));
+            set_pending_host_setup.set(Some((auction_enabled, clamped_max, clamped_bots)));
+        } else {
+            set_pending_host_setup.set(None);
+        }
 
         let ws_protocol = if web_sys::window()
             .map(|w| w.location().protocol().unwrap_or_default())
@@ -1025,13 +1087,12 @@ pub fn App() -> impl IntoView {
         let host = web_sys::window()
             .map(|w| w.location().host().unwrap_or_default())
             .unwrap_or_else(|| "127.0.0.1:8080".to_string());
-        let ws_url = format!("{}//{}/ws?room={}", ws_protocol, host, target_room);
+        let ws_url = format!("{}//{}/ws?room={}", ws_protocol, host, normalized_room);
 
         let client_res = WsClient::connect(
             ws_url,
-            target_room,
-            name,
-            auction_enabled,
+            normalized_room,
+            trimmed_name,
             move |server_msg| {
                 process_server_message.call(server_msg);
             },
@@ -1406,6 +1467,8 @@ pub fn App() -> impl IntoView {
                                                             </label>
                                                             <input
                                                                 type="text"
+                                                                placeholder="Nhập tên của bạn..."
+                                                                maxlength="24"
                                                                 prop:value=player_name
                                                                 on:input=move |ev| set_player_name.set(event_target_value(&ev))
                                                             />
@@ -1415,12 +1478,123 @@ pub fn App() -> impl IntoView {
                                                             <label style=format!("font-size: 13px; line-height: 20px; font-weight: 500; color: {};", TEXT_SECONDARY)>
                                                                 "Mã phòng"
                                                             </label>
-                                                            <input
-                                                                class="mono"
-                                                                type="text"
-                                                                prop:value=room_id
-                                                                on:input=move |ev| set_room_id.set(event_target_value(&ev))
-                                                            />
+                                                            <div style="display: flex; gap: 8px;">
+                                                                <input
+                                                                    class="mono"
+                                                                    type="text"
+                                                                    style="flex: 1; min-width: 0;"
+                                                                    placeholder="VD: SGN-A1B2"
+                                                                    maxlength="16"
+                                                                    prop:value=room_id
+                                                                    on:input=move |ev| set_room_id.set(event_target_value(&ev).to_uppercase())
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    class="btn btn-outline"
+                                                                    style="min-height: 36px; padding: 0 12px; font-size: 12px; flex-shrink: 0;"
+                                                                    on:click=move |_| set_room_id.set(generate_random_room_code())
+                                                                >
+                                                                    "Ngẫu nhiên"
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                            <label style=format!("font-size: 13px; line-height: 20px; font-weight: 500; color: {};", TEXT_SECONDARY)>
+                                                                "Số người chơi (Chủ phòng)"
+                                                            </label>
+                                                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                                                                {[2u8, 3, 4].into_iter().map(|cnt| {
+                                                                    view! {
+                                                                        <button
+                                                                            type="button"
+                                                                            class=move || if online_max_players.get() == cnt { "btn" } else { "btn btn-outline" }
+                                                                            style="min-height: 36px; font-size: 13px; padding: 0 8px;"
+                                                                            on:click=move |_| {
+                                                                                set_online_max_players.set(cnt);
+                                                                                let max_bots = cnt.saturating_sub(1);
+                                                                                if online_bot_count.get_untracked() > max_bots {
+                                                                                    set_online_bot_count.set(max_bots.max(1));
+                                                                                }
+                                                                            }
+                                                                        >
+                                                                            {format!("{} Người", cnt)}
+                                                                        </button>
+                                                                    }
+                                                                }).collect_view()}
+                                                            </div>
+                                                        </div>
+
+                                                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                            <div
+                                                                style=format!(
+                                                                    "padding: 12px; border-radius: 8px; background: {}; border: 1px solid {}; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer;",
+                                                                    BG_SECONDARY, BORDER_DEFAULT
+                                                                )
+                                                                on:click=move |_| {
+                                                                    let next = !online_add_bots.get_untracked();
+                                                                    set_online_add_bots.set(next);
+                                                                    if next {
+                                                                        let max_bots = online_max_players.get_untracked().saturating_sub(1).max(1);
+                                                                        set_online_bot_count.set(max_bots);
+                                                                    }
+                                                                }
+                                                            >
+                                                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                                                    <span style=format!("font-size: 14px; line-height: 20px; font-weight: 500; color: {};", TEXT_PRIMARY)>
+                                                                        "Thêm máy AI"
+                                                                    </span>
+                                                                    <span style=format!("font-size: 12px; line-height: 16px; color: {};", TEXT_MUTED)>
+                                                                        {move || if online_add_bots.get() {
+                                                                            format!("Tự động thêm {} máy AI vào phòng khi tạo", online_bot_count.get())
+                                                                        } else {
+                                                                            "Chỉ người chơi thật tham gia qua mã phòng".to_string()
+                                                                        }}
+                                                                    </span>
+                                                                </div>
+                                                                <div style=format!(
+                                                                    "padding: 4px 8px; border-radius: 4px; background: {}; border: 1px solid {}; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;",
+                                                                    SURFACE_HOVER, BORDER_DEFAULT
+                                                                )>
+                                                                    <span style=move || format!(
+                                                                        "width: 6px; height: 6px; border-radius: 50%; background: {};",
+                                                                        if online_add_bots.get() { STATUS_SUCCESS } else { TEXT_MUTED }
+                                                                    )></span>
+                                                                    <span class="mono" style=move || format!(
+                                                                        "font-size: 12px; line-height: 16px; font-weight: 500; color: {};",
+                                                                        if online_add_bots.get() { TEXT_PRIMARY } else { TEXT_MUTED }
+                                                                    )>
+                                                                        {move || if online_add_bots.get() { "Có" } else { "Không" }}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+
+                                                            {move || if online_add_bots.get() {
+                                                                let max_bots = online_max_players.get().saturating_sub(1);
+                                                                view! {
+                                                                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px;">
+                                                                        <span style=format!("font-size: 12px; color: {};", TEXT_SECONDARY)>
+                                                                            "Số lượng máy AI:"
+                                                                        </span>
+                                                                        <div style="display: flex; gap: 6px;">
+                                                                            {(1..=max_bots).map(|b| {
+                                                                                view! {
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        class=move || if online_bot_count.get() == b { "btn" } else { "btn btn-outline" }
+                                                                                        style="min-height: 30px; min-width: 40px; font-size: 12px; padding: 0 10px;"
+                                                                                        on:click=move |_| set_online_bot_count.set(b)
+                                                                                    >
+                                                                                        {format!("{} AI", b)}
+                                                                                    </button>
+                                                                                }
+                                                                            }).collect_view()}
+                                                                        </div>
+                                                                    </div>
+                                                                }.into_view()
+                                                            } else {
+                                                                view! {}.into_view()
+                                                            }}
                                                         </div>
 
                                                         <div
@@ -1464,7 +1638,14 @@ pub fn App() -> impl IntoView {
                                                                 class="btn"
                                                                 style="flex: 1;"
                                                                 on:click=move |_| {
-                                                                    connect_to_room(room_id.get(), player_name.get(), enable_auction_config.get());
+                                                                    let bots = if online_add_bots.get() { online_bot_count.get() } else { 0 };
+                                                                    connect_to_room(
+                                                                        room_id.get(),
+                                                                        player_name.get(),
+                                                                        enable_auction_config.get(),
+                                                                        online_max_players.get(),
+                                                                        bots,
+                                                                    );
                                                                 }
                                                             >
                                                                 "Vào phòng"
@@ -1475,11 +1656,11 @@ pub fn App() -> impl IntoView {
                                                                 on:click=move |_| {
                                                                     let p_name = player_name.get();
                                                                     let auction_opt = enable_auction_config.get();
-                                                                    spawn_local(async move {
-                                                                        let generated_room = format!("SGN-{}", uuid::Uuid::new_v4().to_string()[..4].to_uppercase());
-                                                                        set_room_id.set(generated_room.clone());
-                                                                        connect_to_room(generated_room, p_name, auction_opt);
-                                                                    });
+                                                                    let max_p = online_max_players.get();
+                                                                    let bots = if online_add_bots.get() { online_bot_count.get() } else { 0 };
+                                                                    let generated_room = generate_random_room_code();
+                                                                    set_room_id.set(generated_room.clone());
+                                                                    connect_to_room(generated_room, p_name, auction_opt, max_p, bots);
                                                                 }
                                                             >
                                                                 "Tạo phòng mới"
@@ -1512,16 +1693,18 @@ pub fn App() -> impl IntoView {
                                                         <div style="display: flex; flex-direction: column; gap: 8px;">
                                                             {move || {
                                                                 let cnt = local_player_count.get();
-                                                                let slots = local_slots.get();
                                                                 (0..cnt).map(|idx| {
-                                                                    let slot = slots[idx].clone();
                                                                     view! {
                                                                         <div style="display: flex; align-items: center; gap: 8px;">
                                                                             <PlayerAvatar seat_idx=idx size=28 />
                                                                             <input
                                                                                 type="text"
                                                                                 style="flex: 1; min-width: 0;"
-                                                                                prop:value=slot.name
+                                                                                prop:value=move || {
+                                                                                    local_slots.with(|list| {
+                                                                                        list.get(idx).map(|s| s.name.clone()).unwrap_or_default()
+                                                                                    })
+                                                                                }
                                                                                 on:input=move |ev| {
                                                                                     let val = event_target_value(&ev);
                                                                                     set_local_slots.update(|list| {
@@ -1532,14 +1715,16 @@ pub fn App() -> impl IntoView {
                                                                                 }
                                                                             />
                                                                             {if idx > 0 {
-                                                                                let is_bot = slot.is_bot;
                                                                                 view! {
                                                                                     <button
                                                                                         class="btn btn-outline"
-                                                                                        style=format!(
-                                                                                            "min-height: 36px; width: 88px; font-size: 12px; padding: 0 8px; flex-shrink: 0; color: {};",
-                                                                                            if is_bot { STATUS_WARNING } else { STATUS_SUCCESS }
-                                                                                        )
+                                                                                        style=move || {
+                                                                                            let is_bot = local_slots.with(|list| list.get(idx).map(|s| s.is_bot).unwrap_or(false));
+                                                                                            format!(
+                                                                                                "min-height: 36px; width: 88px; font-size: 12px; padding: 0 8px; flex-shrink: 0; color: {};",
+                                                                                                if is_bot { STATUS_WARNING } else { STATUS_SUCCESS }
+                                                                                            )
+                                                                                        }
                                                                                         on:click=move |_| {
                                                                                             set_local_slots.update(|list| {
                                                                                                 if let Some(item) = list.get_mut(idx) {
@@ -1554,7 +1739,10 @@ pub fn App() -> impl IntoView {
                                                                                             });
                                                                                         }
                                                                                     >
-                                                                                        {if is_bot { "Máy AI" } else { "Người" }}
+                                                                                        {move || {
+                                                                                            let is_bot = local_slots.with(|list| list.get(idx).map(|s| s.is_bot).unwrap_or(false));
+                                                                                            if is_bot { "Máy AI" } else { "Người" }
+                                                                                        }}
                                                                                     </button>
                                                                                 }.into_view()
                                                                             } else {
@@ -1616,90 +1804,6 @@ pub fn App() -> impl IntoView {
                                                     </div>
                                                 }.into_view(),
                                             }}
-                                        </div>
-                                    </div>
-
-                                    // Right Column: Tactile Saigon Title Deed Preview Moment
-                                    <div class="panel" style="padding: 20px; gap: 16px;">
-                                        <div style=format!(
-                                            "border-radius: 8px; background: {}; padding: 16px; display: flex; flex-direction: column; gap: 4px; border: 1px solid {};",
-                                            DISTRICT_1_DARK_BLUE, BORDER_DEFAULT
-                                        )>
-                                            <div style="display: flex; align-items: center; justify-content: space-between;">
-                                                <span class="mono" style=format!("font-size: 12px; line-height: 16px; color: {}; opacity: 0.85;", TEXT_PRIMARY)>
-                                                    "Ô #39 · Quận 1 · Bến Nghé"
-                                                </span>
-                                                <span class="mono" style=format!("font-size: 12px; line-height: 16px; color: {}; opacity: 0.85;", TEXT_PRIMARY)>
-                                                    "Khế ước mẫu"
-                                                </span>
-                                            </div>
-                                            <span style=format!("font-size: 20px; line-height: 28px; font-weight: 600; color: {};", TEXT_PRIMARY)>
-                                                "Đồng Khởi"
-                                            </span>
-                                        </div>
-
-                                        <div style=format!(
-                                            "display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px; border-radius: 8px; background: {}; border: 1px solid {};",
-                                            BG_SECONDARY, BORDER_DEFAULT
-                                        )>
-                                            <div style="display: flex; flex-direction: column; gap: 4px;">
-                                                <span style=format!("font-size: 12px; line-height: 16px; color: {};", TEXT_MUTED)>"Giá mua đất"</span>
-                                                <span class="mono" style=format!("font-size: 14px; line-height: 20px; font-weight: 500; color: {};", TEXT_PRIMARY)>"4.000.000 đ"</span>
-                                            </div>
-                                            <div style="display: flex; flex-direction: column; gap: 4px;">
-                                                <span style=format!("font-size: 12px; line-height: 16px; color: {};", TEXT_MUTED)>"Chi phí xây nhà"</span>
-                                                <span class="mono" style=format!("font-size: 14px; line-height: 20px; font-weight: 500; color: {};", TEXT_PRIMARY)>"2.000.000 đ"</span>
-                                            </div>
-                                            <div style="display: flex; flex-direction: column; gap: 4px;">
-                                                <span style=format!("font-size: 12px; line-height: 16px; color: {};", TEXT_MUTED)>"Giá trị thế chấp"</span>
-                                                <span class="mono" style=format!("font-size: 14px; line-height: 20px; font-weight: 500; color: {};", TEXT_SECONDARY)>"2.000.000 đ"</span>
-                                            </div>
-                                        </div>
-
-                                        <div style=format!(
-                                            "display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 8px; background: {}; border: 1px solid {};",
-                                            BG_SECONDARY, BORDER_DEFAULT
-                                        )>
-                                            <div style="display: flex; justify-content: space-between; height: 28px; align-items: center;">
-                                                <span style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"Thuê đất trống"</span>
-                                                <span class="mono" style=format!("font-size: 13px; color: {}; font-weight: 500;", TEXT_PRIMARY)>"500.000 đ"</span>
-                                            </div>
-                                            <div style="display: flex; justify-content: space-between; height: 28px; align-items: center;">
-                                                <span style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"Sở hữu trọn bộ Quận 1"</span>
-                                                <span class="mono" style=format!("font-size: 13px; color: {}; font-weight: 500;", TEXT_PRIMARY)>"1.000.000 đ"</span>
-                                            </div>
-                                            <div style="display: flex; justify-content: space-between; height: 28px; align-items: center;">
-                                                <span style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"1 căn nhà phố"</span>
-                                                <span class="mono" style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"2.000.000 đ"</span>
-                                            </div>
-                                            <div style="display: flex; justify-content: space-between; height: 28px; align-items: center;">
-                                                <span style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"2 căn nhà phố"</span>
-                                                <span class="mono" style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"6.000.000 đ"</span>
-                                            </div>
-                                            <div style="display: flex; justify-content: space-between; height: 28px; align-items: center;">
-                                                <span style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"3 căn nhà phố"</span>
-                                                <span class="mono" style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"14.000.000 đ"</span>
-                                            </div>
-                                            <div style="display: flex; justify-content: space-between; height: 28px; align-items: center;">
-                                                <span style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"4 căn nhà phố"</span>
-                                                <span class="mono" style=format!("font-size: 13px; color: {};", TEXT_SECONDARY)>"17.000.000 đ"</span>
-                                            </div>
-                                            <div style=format!(
-                                                "display: flex; justify-content: space-between; height: 32px; align-items: center; padding: 0 8px; margin: 4px -8px -4px -8px; border-radius: 4px; background: {};",
-                                                SURFACE_HOVER
-                                            )>
-                                                <span style=format!("font-size: 13px; font-weight: 500; color: {};", STATUS_WARNING)>"Cấp khách sạn"</span>
-                                                <span class="mono" style=format!("font-size: 13px; font-weight: 500; color: {};", STATUS_WARNING)>"20.000.000 đ"</span>
-                                            </div>
-                                        </div>
-
-                                        <div style="display: flex; align-items: center; justify-content: space-between;">
-                                            <span class="mono" style=format!("font-size: 12px; line-height: 16px; color: {};", TEXT_MUTED)>
-                                                "Vốn khởi điểm: 15.000.000 đ"
-                                            </span>
-                                            <span class="mono" style=format!("font-size: 12px; line-height: 16px; color: {};", TEXT_MUTED)>
-                                                "Qua Khởi hành: +2.000.000 đ"
-                                            </span>
                                         </div>
                                     </div>
                                 </div>
@@ -1841,6 +1945,7 @@ pub fn App() -> impl IntoView {
                                         .map(|p| p.seat_index == 0)
                                         .unwrap_or(false);
                                     let player_count = st.players.len();
+                                    let max_p = st.config.max_players.clamp(2, 4) as usize;
                                     let r_id = room_id.get();
 
                                     view! {
@@ -1852,7 +1957,7 @@ pub fn App() -> impl IntoView {
                                                             {format!("Phòng chờ · {}", r_id)}
                                                         </span>
                                                         <h2 style=format!("font-size: 20px; font-weight: 600; color: {};", TEXT_PRIMARY)>
-                                                            {format!("Đang chờ người chơi ({}/4)", player_count)}
+                                                            {format!("Đang chờ người chơi ({}/{})", player_count, max_p)}
                                                         </h2>
                                                     </div>
                                                     <span class="mono" style=format!(
@@ -1864,7 +1969,7 @@ pub fn App() -> impl IntoView {
                                                 </div>
 
                                                 <div style="display: flex; flex-direction: column; gap: 8px;">
-                                                    {(0..4usize).map(|seat_idx| {
+                                                    {(0..max_p).map(|seat_idx| {
                                                         if let Some(p) = st.players.get(seat_idx) {
                                                             let is_me = my_id == Some(p.id);
                                                             let badge = if seat_idx == 0 {
@@ -1916,7 +2021,7 @@ pub fn App() -> impl IntoView {
                                                             <button
                                                                 class="btn btn-secondary"
                                                                 style="flex: 1;"
-                                                                disabled=move || player_count >= 4
+                                                                disabled=move || player_count >= max_p
                                                                 on:click=move |_| handle_action.call(ClientMessage::AddBot)
                                                             >
                                                                 "Thêm máy AI"
@@ -1934,7 +2039,7 @@ pub fn App() -> impl IntoView {
                                                 } else {
                                                     view! {
                                                         <div style=format!("text-align: center; font-size: 13px; color: {}; padding: 4px 0;", TEXT_SECONDARY)>
-                                                            "Đang chờ chủ phòng bắt đầu ván đấu (tự động bắt đầu khi đủ 4 người)..."
+                                                            {format!("Đang chờ chủ phòng bắt đầu ván đấu (tự động bắt đầu khi đủ {} người)...", max_p)}
                                                         </div>
                                                     }.into_view()
                                                 }}
@@ -2203,10 +2308,7 @@ pub fn App() -> impl IntoView {
                                     </div>
                                     <button
                                         class="btn-outline"
-                                        style=format!(
-                                            "height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12px; color: {}; border: 1px solid rgba(239, 233, 222, 0.2); cursor: pointer;",
-                                            TEXT_PRIMARY
-                                        )
+                                        style="height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12px; color: #fbf7ee; border: 1px solid rgba(239, 233, 222, 0.25); cursor: pointer;"
                                         on:click=move |_| set_show_rules.set(false)
                                     >
                                         "Đóng"

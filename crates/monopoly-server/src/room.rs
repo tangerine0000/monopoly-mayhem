@@ -176,7 +176,8 @@ impl RoomActor {
             let _ = reply.send(Err("Game already started".to_string()));
             return;
         }
-        if self.state.players.len() >= 4 {
+        let max_players = self.state.config.max_players.clamp(2, 4) as usize;
+        if self.state.players.len() >= max_players {
             let _ = reply.send(Err("Room is full".to_string()));
             return;
         }
@@ -207,7 +208,7 @@ impl RoomActor {
         })
         .await;
 
-        if self.state.players.len() == 4 {
+        if self.state.players.len() >= max_players {
             self.start_game().await;
         }
     }
@@ -337,9 +338,16 @@ impl RoomActor {
                 .unwrap_or(false);
 
             match action {
-                ClientMessage::ConfigureGame { enable_auction } => {
+                ClientMessage::ConfigureGame {
+                    enable_auction,
+                    max_players,
+                } => {
                     if is_host {
                         self.state.config.enable_auction = enable_auction;
+                        if let Some(mp) = max_players {
+                            let min_allowed = self.state.players.len().max(2) as u8;
+                            self.state.config.max_players = mp.clamp(2, 4).max(min_allowed);
+                        }
                         self.broadcast(ServerMessage::SyncSnapshot {
                             state: serde_json::to_value(&self.state).unwrap_or_default(),
                         })
@@ -357,11 +365,12 @@ impl RoomActor {
                         }
                         return;
                     }
-                    if self.state.players.len() >= 4 {
+                    let max_players = self.state.config.max_players.clamp(2, 4) as usize;
+                    if self.state.players.len() >= max_players {
                         if let Some(tx) = self.clients.get(&player_id) {
                             let _ = tx
                                 .send(ServerMessage::ActionRejected {
-                                    reason: "Phòng đã đủ 4 người chơi".to_string(),
+                                    reason: format!("Phòng đã đủ {} người chơi", max_players),
                                 })
                                 .await;
                         }

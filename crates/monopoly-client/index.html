@@ -95,11 +95,12 @@
             flex: 1;
             min-height: 0;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            justify-content: center;
-            padding: 12px 16px 84px 16px;
+            justify-content: flex-start;
+            gap: 8px;
+            padding: 10px 16px 84px 16px;
             width: 100%;
-            height: calc(100dvh - 56px);
             overflow: hidden;
             background: linear-gradient(160deg, #8fb8de 0%, #a8cae8 52%, #bfd9f2 100%);
         }
@@ -250,9 +251,9 @@
 
         .lobby-grid {
             display: grid;
-            grid-template-columns: minmax(0, 420px) minmax(0, 460px);
-            gap: 32px;
-            max-width: 912px;
+            grid-template-columns: minmax(0, 480px);
+            justify-content: center;
+            max-width: 480px;
             width: 100%;
             align-items: center;
         }
@@ -281,7 +282,7 @@
                 display: none !important;
             }
             .game-layout {
-                height: calc(100dvh - 50px);
+                gap: 6px;
                 padding: 6px 6px 82px 6px;
             }
             .board-camera-hud {
@@ -429,13 +430,13 @@
 
         input:focus {
             border-color: var(--border-strong);
-            background-color: #181714;
+            background-color: var(--input-focus-bg, #181714);
         }
 
         /* SVG Board & 3D Tabletop Model Frame */
         .board-container {
+            flex: 1;
             width: 100%;
-            height: 100%;
             min-width: 0;
             min-height: 0;
             display: flex;
@@ -1001,10 +1002,8 @@
 
         /* Floating Player Standings Strip */
         .standings-strip {
-            position: absolute;
-            top: 12px;
-            left: 50%;
-            transform: translateX(-50%);
+            position: relative;
+            flex-shrink: 0;
             z-index: 25;
             display: flex;
             align-items: center;
@@ -1157,6 +1156,8 @@
         .stage-card {
             pointer-events: auto;
             width: min(370px, 100%);
+            max-height: 100%;
+            overflow-y: auto;
             background: rgba(24, 45, 70, 0.94);
             border: 1px solid rgba(212, 168, 83, 0.48);
             border-radius: 12px;
@@ -1240,6 +1241,9 @@
         .stage-drawn-card {
             pointer-events: auto;
             width: min(360px, 100%);
+            max-height: 100%;
+            overflow-y: auto;
+            cursor: pointer;
             border-radius: 12px;
             padding: 12px 14px;
             box-shadow: 0 14px 32px rgba(10, 22, 38, 0.42);
@@ -1442,7 +1446,10 @@
 
             --board-outer-bg: #d2bf9b;
             --board-center-bg: #efe3c9;
+            --board-center-grad-start: #f4ead6;
+            --board-center-grad-end: #e4d2ad;
             --board-center-border: #b9a580;
+            --input-focus-bg: #efe3c9;
             --tile-bg: #f4ead6;
             --tile-corner-bg: #eadcc0;
             --tile-selected-stroke: #e3a72f;
@@ -1511,11 +1518,84 @@
             box-shadow: 0 28px 60px -24px rgba(0, 0, 0, 0.72), 0 0 0 4px #b9a580;
         }
 
+        :root[data-template="gachbong"] .board-aspect-frame::after {
+            background: linear-gradient(180deg, #b9a580 0%, #8b7754 100%);
+        }
+
+        :root[data-template="gachbong"] .standing-pill {
+            background: rgba(244, 234, 214, 0.94);
+            border: 1.5px solid #d2bf9b;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+        }
+
+        :root[data-template="gachbong"] .standing-pill.active {
+            background: #fff9ed;
+            border-color: #c8372d;
+            box-shadow: 0 6px 16px rgba(200, 55, 45, 0.25);
+        }
+
+        :root[data-template="gachbong"] .standing-district-bar.monopoly {
+            box-shadow: 0 0 0 1px rgba(31, 26, 21, 0.45);
+        }
+
+        :root[data-template="gachbong"] .deed-2d-card {
+            background: #f4ead6;
+            border: 1.5px solid #d2bf9b;
+            box-shadow: 0 24px 56px rgba(0, 0, 0, 0.45);
+        }
+
+        :root[data-template="gachbong"] .deed-2d-primary-box {
+            background: #eadcc0;
+            border-color: #d2bf9b;
+        }
+
+        :root[data-template="gachbong"] .deed-2d-secondary-box {
+            background: #efe3c9;
+            border-color: #d2bf9b;
+        }
+
+        :root[data-template="gachbong"] .deed-2d-tier-row.active {
+            background: rgba(227, 167, 47, 0.25);
+        }
+
+        :root[data-template="gachbong"] .deed-2d-actions {
+            border-top-color: #d2bf9b;
+        }
+
         :root[data-template="gachbong"] .stage-card {
             background: rgba(244, 234, 214, 0.96);
             border: 1.5px solid #d2bf9b;
             box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset, 0 16px 32px -12px rgba(0, 0, 0, 0.42);
             color: #1f1a15;
+        }
+
+        :root[data-template="gachbong"] .stage-district-pill {
+            background: rgba(31, 26, 21, 0.08);
+        }
+
+        :root[data-template="gachbong"] .stage-reason {
+            color: #3d342a;
+            background: #eadcc0;
+            border-color: #d2bf9b;
+        }
+
+        :root[data-template="gachbong"] .stage-link-btn {
+            color: #9b5b10;
+        }
+
+        :root[data-template="gachbong"] .stage-link-btn:hover {
+            color: #c8372d;
+        }
+
+        :root[data-template="gachbong"] .stage-bidder-chip {
+            background: #eadcc0;
+            border-color: #d2bf9b;
+            color: #1f1a15;
+        }
+
+        :root[data-template="gachbong"] .stage-bidder-chip.leading {
+            border-color: #c8372d;
+            background: rgba(227, 167, 47, 0.25);
         }
 
         :root[data-template="gachbong"] .stage-drawn-card.chance {
