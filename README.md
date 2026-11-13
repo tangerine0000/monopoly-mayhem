@@ -48,3 +48,7 @@ cargo run -p monopoly-server
 # Terminal 2: Start the Leptos WASM client dev server
 cd crates/monopoly-client && trunk serve
 ```
+
+## License
+
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Anyone may use, modify, and distribute this software for noncommercial purposes only. All commercial rights are reserved by the copyright holder (Tan Nguyen).
