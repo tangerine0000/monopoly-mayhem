@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup · Khoảnh khắc chính</title>
+<link rel="stylesheet" href="shared.css">
+<script src="board.js"></script>
+<style>
+  body { overflow: hidden; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 18px; padding: 18px; height: 100vh; }
+  .pane { position: relative; border-radius: 20px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.06); display: grid; place-items: center; overflow: hidden; }
+  .pane > .lbl { position: absolute; left: 18px; top: 14px; font: 600 var(--t-meta) var(--f-ui); color: #9fbdb5; }
+  .panel { background: #fffaf0; border-radius: 20px; box-shadow: var(--shadow-pop); }
+  h3 { font: 800 24px/1.15 var(--f-display); }
+  .sub { font: 500 var(--t-body) var(--f-ui); color: var(--ink-3); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* A. Vé số: 1 tiêu đề, 1 con số, 1 nút */
+  .ticket { width: 420px; display: grid; grid-template-columns: 1fr 104px; transform: rotate(-2deg); filter: drop-shadow(0 24px 30px rgba(0,0,0,.45)); }
+  .ticket .main { background: linear-gradient(135deg, #fff6d8, #ffe9a8); border-radius: 18px 0 0 18px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px;
+    -webkit-mask: radial-gradient(circle at 100% 50%, transparent 10px, #000 10.5px); }
+  .ticket .tag { font: 600 var(--t-meta) var(--f-ui); color: var(--son); display: flex; align-items: center; gap: 6px; }
+  .ticket .tag svg { width: 16px; height: 16px; }
+  .ticket .eff { font: 800 34px var(--f-display); color: #1f7a45; line-height: 1; }
+  .ticket .stub { background: var(--son); border-radius: 0 18px 18px 0; border-left: 3px dashed #ffe9a8; display: grid; place-items: center; }
+  .ticket .stub svg { width: 46px; height: 46px; }
+  .after { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); }
+  .after .btn { height: 46px; font-size: 16px; padding: 0 26px; position: relative; overflow: hidden; }
+  .after .btn::after { content: ""; position: absolute; left: 0; bottom: 0; height: 4px; width: 60%; background: rgba(0,0,0,.25); }
+
+  /* B. Đấu giá: giá cao nhất là trung tâm */
+  .auction { width: 460px; overflow: hidden; }
+  .auction .top { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; background: var(--q3); }
+  .auction .top .d { font: 500 var(--t-meta) var(--f-ui); color: #5d4508; }
+  .ring { position: relative; width: 56px; height: 56px; display: grid; place-items: center; font: 800 22px var(--f-display); }
+  .ring svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+  .auction .mid { padding: 22px 20px 6px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .auction .mid .v { font: 800 40px/1 var(--f-display); }
+  .leader { display: flex; align-items: center; gap: 8px; font: 600 var(--t-body) var(--f-ui); color: var(--ink-2); }
+  .leader .avatar { width: 28px; height: 28px; border-width: 2px; } .leader .avatar svg { width: 15px; height: 15px; }
+  .who-row { display: flex; justify-content: center; gap: 8px; padding: 12px 20px 4px; }
+  .who-row .avatar { width: 34px; height: 34px; border-width: 2px; } .who-row .avatar svg { width: 18px; height: 18px; }
+  .who-row .out { opacity: .3; filter: grayscale(1); }
+  .auction .acts { padding: 14px 20px 20px; display: grid; grid-template-columns: 1fr 1fr 0.8fr; gap: 10px; }
+  .auction .acts .btn { height: 54px; font-size: 18px; }
+
+  /* C. Thiếu tiền: 1 câu, 1 thanh, danh sách 1 dòng */
+  .debt { width: 440px; padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+  .meter .bar { height: 12px; border-radius: 6px; background: #f1dcd8; overflow: hidden; display: flex; }
+  .meter .bar i { display: block; height: 100%; }
+  .meter .lg { display: flex; justify-content: space-between; margin-top: 8px; font: 500 var(--t-meta) var(--f-ui); color: var(--ink-3); }
+  .meter .lg b { color: #1f7a45; font-weight: 600; }
+  .opts { display: flex; flex-direction: column; }
+  .opt { display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: center; padding: 12px 2px; border-top: 1px solid var(--plaster-2); font: 500 15px var(--f-ui); }
+  .opt .cb { width: 22px; height: 22px; border-radius: 7px; border: 2px solid var(--plaster-edge); display: grid; place-items: center; }
+  .opt.sel .cb { background: #3b9a5e; border-color: #3b9a5e; }
+  .opt .cb svg { width: 14px; height: 14px; }
+  .opt b { font: 600 15px var(--f-ui); color: #1f7a45; }
+  .debt .acts { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .debt .acts .btn { height: 54px; font-size: 18px; }
+  .link { font: 500 var(--t-meta) var(--f-ui); color: var(--ink-3); text-align: center; text-decoration: underline; text-underline-offset: 3px; }
+
+  /* D. Giao dịch: 2 cột hình, 1 dòng hệ quả */
+  .trade { width: 500px; padding: 22px; display: flex; flex-direction: column; gap: 18px; }
+  .trade .h { display: flex; align-items: center; gap: 12px; }
+  .trade .h .avatar { width: 40px; height: 40px; border-width: 2px; } .trade .h .avatar svg { width: 22px; height: 22px; }
+  .trade .h .t { font: 600 var(--t-label) var(--f-ui); }
+  .trade .h .ring { width: 40px; height: 40px; font-size: 15px; margin-left: auto; }
+  .cols { display: grid; grid-template-columns: 1fr 32px 1fr; align-items: center; }
+  .side { display: flex; flex-direction: column; gap: 8px; }
+  .side .sub { font-size: var(--t-meta); }
+  .dm { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 12px; padding: 10px 12px; font: 600 15px var(--f-ui); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .dm i { width: 6px; height: 22px; border-radius: 3px; }
+  .dm.money { color: #1f7a45; font-weight: 700; }
+  .cols > svg { width: 24px; height: 24px; color: var(--ink-3); justify-self: center; }
+  .effect { display: flex; align-items: center; gap: 10px; font: 600 var(--t-body) var(--f-ui); color: #1f6d3f; background: #e8f3ec; padding: 10px 14px; border-radius: 12px; }
+  .effect svg { width: 18px; height: 18px; }
+  .trade .acts { display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; }
+  .trade .acts .btn { height: 52px; font-size: 17px; }
+</style>
+</head>
+<body class="gachbong-bg">
+<div class="grid">
+  <!-- A -->
+  <section class="pane">
+    <span class="lbl">A · Rút thẻ Cơ hội</span>
+    <div class="ticket">
+      <div class="main">
+        <span class="tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 0 2-2h14a2 2 0 0 0 2 2v10a2 2 0 0 0-2 2H5a2 2 0 0 0-2-2z"/></svg>Cơ hội · vé số kiến thiết</span>
+        <h3>Trúng giải khuyến khích</h3>
+        <span class="eff num">+1.000.000 đ</span>
+      </div>
+      <div class="stub"><svg viewBox="0 0 24 24" fill="none" stroke="#ffe9a8" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.6c0 2.4-5 1.2-5 3.8 0 1 1.1 1.6 2.5 1.6s2.5-.5 2.5-1.5"/></svg></div>
+    </div>
+    <div class="after"><button class="btn btn-gold">Nhận tiền</button></div>
+  </section>
+
+  <!-- B -->
+  <section class="pane">
+    <span class="lbl">B · Đấu giá</span>
+    <div class="panel auction">
+      <div class="top"><div><div class="d">Quận 3 · giá gốc 2,6tr</div><h3>Nam Kỳ Khởi Nghĩa</h3></div>
+        <div class="ring num"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="24" fill="none" stroke="rgba(0,0,0,.15)" stroke-width="5"/><circle cx="28" cy="28" r="24" fill="none" stroke="var(--ink)" stroke-width="5" stroke-dasharray="151" stroke-dashoffset="66" stroke-linecap="round"/></svg>5</div></div>
+      <div class="mid"><span class="v num">1.900.000 đ</span><span class="leader"><span class="avatar" style="--c:var(--p2)" data-v="xichlo"></span>Lan đang dẫn</span></div>
+      <div class="who-row"><span class="avatar" style="--c:var(--p1)" data-v="cub"></span><span class="avatar" style="--c:var(--p2)" data-v="xichlo"></span><span class="avatar out" style="--c:var(--p3)" data-v="vespa"></span><span class="avatar out" style="--c:var(--p4)" data-v="bus"></span></div>
+      <div class="acts"><button class="btn btn-gold">+100k</button><button class="btn btn-gold">+500k</button><button class="btn btn-ghost">Bỏ</button></div>
+    </div>
+  </section>
+
+  <!-- C -->
+  <section class="pane">
+    <span class="lbl">C · Không đủ tiền</span>
+    <div class="panel debt">
+      <div><h3>Cần trả Lan 2.700.000 đ</h3><div class="sub">Bạn có 1.600.000 đ. Chọn tài sản để bù.</div></div>
+      <div class="meter"><div class="bar"><i style="width:59%;background:#3b9a5e"></i><i style="width:41%;background:#8fcca5"></i></div>
+        <div class="lg num"><span>1,6tr + 1,1tr</span><b>Đã đủ</b></div></div>
+      <div class="opts">
+        <div class="opt sel"><span class="cb"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M5 12l5 5 9-10"/></svg></span><span>Bán 2 nhà ở Quận 8</span><b class="num">+500k</b></div>
+        <div class="opt sel"><span class="cb"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M5 12l5 5 9-10"/></svg></span><span>Thế chấp Ga Sài Gòn</span><b class="num">+1tr</b></div>
+        <div class="opt"><span class="cb"></span><span>Thế chấp Đồng Khởi</span><b class="num">+1,75tr</b></div>
+      </div>
+      <div class="acts"><button class="btn btn-primary">Trả tiền</button><span class="link">Tuyên bố phá sản</span></div>
+    </div>
+  </section>
+
+  <!-- D -->
+  <section class="pane">
+    <span class="lbl">D · Giao dịch</span>
+    <div class="panel trade">
+      <div class="h"><span class="avatar" style="--c:var(--p2)" data-v="xichlo"></span><span class="t">Lan muốn đổi đất</span>
+        <span class="ring num"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="none" stroke="var(--plaster-2)" stroke-width="4"/><circle cx="20" cy="20" r="17" fill="none" stroke="var(--ink)" stroke-width="4" stroke-dasharray="107" stroke-dashoffset="30" stroke-linecap="round"/></svg>24</span></div>
+      <div class="cols">
+        <div class="side"><span class="sub">Bạn nhận</span>
+          <div class="dm"><i style="background:var(--q2)"></i>Song Hành</div>
+          <div class="dm money num">+500.000 đ</div></div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7h12l-4-4M17 17H5l4 4"/></svg>
+        <div class="side"><span class="sub">Bạn đưa</span>
+          <div class="dm"><i style="background:var(--tb)"></i>Lê Văn Sỹ</div>
+          <div class="dm"><i style="background:#6e6a63"></i>Ga Sài Gòn</div></div>
+      </div>
+      <div class="effect"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.2" stroke-linecap="round"/></svg>Sau giao dịch, Lan đủ bộ Tân Bình</div>
+      <div class="acts"><button class="btn btn-primary">Đồng ý</button><button class="btn btn-ghost">Từ chối</button></div>
+    </div>
+  </section>
+</div>
+<script>
+  document.querySelectorAll('[data-v]').forEach(el => el.innerHTML = VEHICLE[el.dataset.v]);
+</script>
+</body>
+</html>

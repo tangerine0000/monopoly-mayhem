@@ -1,24 +1,47 @@
 use crate::components::board::{Board, BoardFloatingPopup, PlayerAvatar};
 use crate::components::log::LogFeed;
 use crate::palette::{
-    ACCENT_PRIMARY, BG_SECONDARY, BORDER_DEFAULT, DISTRICT_1_DARK_BLUE, STATUS_DANGER,
-    STATUS_SUCCESS, STATUS_WARNING, SURFACE_HOVER, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
+    get_district_color, ACCENT_PRIMARY, BG_SECONDARY, BORDER_DEFAULT, DISTRICT_1_DARK_BLUE,
+    STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_HOVER, TEXT_MUTED, TEXT_PRIMARY,
+    TEXT_SECONDARY,
 };
 use crate::ws::{save_storage_session_token, WsClient};
 use leptos::*;
-use monopoly_core::board::{get_board, TileKind};
+use monopoly_core::board::{get_board, District, TileKind};
 use monopoly_core::money::Money;
 use monopoly_core::rules::apply_action;
 use monopoly_core::state::{GameState, PlayerState, TurnPhase};
 use monopoly_proto::{ClientMessage, PlayerId, ServerMessage};
 use std::rc::Rc;
 use std::time::Duration;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = window, js_name = playMonopolySound)]
+    fn play_monopoly_sound(kind: &str);
+
+    #[wasm_bindgen(js_namespace = window, js_name = setMonopolySoundMuted)]
+    fn set_monopoly_sound_muted(muted: bool);
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
     Lobby,
     Game,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LobbyTab {
+    Online,
+    Local,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct LocalPlayerSlot {
+    pub name: String,
+    pub is_bot: bool,
 }
 
 fn decide_local_bot_action(state: &GameState, player_id: PlayerId) -> Option<ClientMessage> {
@@ -85,11 +108,13 @@ fn decide_local_bot_action(state: &GameState, player_id: PlayerId) -> Option<Cli
     }
 }
 
+type DeferredTask = std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>>;
+
 fn schedule_when_animation_done(
     is_rolling: ReadSignal<bool>,
     is_animating_move: ReadSignal<bool>,
     delay_ms: u64,
-    task: std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>>,
+    task: DeferredTask,
 ) {
     set_timeout(
         move || {
@@ -103,11 +128,13 @@ fn schedule_when_animation_done(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_local_action(
     actor_id: PlayerId,
     action: ClientMessage,
     local_state: ReadSignal<GameState>,
     set_local_state: WriteSignal<GameState>,
+    set_my_player_id: WriteSignal<Option<PlayerId>>,
     is_local_mode: ReadSignal<bool>,
     is_rolling: ReadSignal<bool>,
     is_animating_move: ReadSignal<bool>,
@@ -140,9 +167,12 @@ fn execute_local_action(
                 && new_state.turn_phase == TurnPhase::TurnEnded
                 && new_state.players.len() == 1
             {
-                if let Ok((end_state, end_events)) =
-                    apply_action(&new_state, actor_id, &ClientMessage::EndTurn, &mut rand::thread_rng())
-                {
+                if let Ok((end_state, end_events)) = apply_action(
+                    &new_state,
+                    actor_id,
+                    &ClientMessage::EndTurn,
+                    &mut rand::thread_rng(),
+                ) {
                     new_state = end_state;
                     events.extend(end_events);
                 }
@@ -161,12 +191,42 @@ fn execute_local_action(
                 return;
             }
 
+            if new_state.turn_phase == TurnPhase::Auction {
+                if let Some(auc) = new_state.auction.as_ref() {
+                    let human_bidders: Vec<PlayerId> = auc
+                        .active_bidders
+                        .iter()
+                        .copied()
+                        .filter(|id| {
+                            new_state
+                                .find_player(*id)
+                                .map(|p| !p.is_bot_controlled && !p.is_bankrupt)
+                                .unwrap_or(false)
+                        })
+                        .collect();
+                    if !human_bidders.is_empty() {
+                        let next_human = if let Some(pos) =
+                            human_bidders.iter().position(|id| *id == actor_id)
+                        {
+                            human_bidders[(pos + 1) % human_bidders.len()]
+                        } else {
+                            human_bidders[0]
+                        };
+                        set_my_player_id.set(Some(next_human));
+                    }
+                }
+            } else if let Some(cur) = new_state.current_player() {
+                if !cur.is_bot_controlled {
+                    set_my_player_id.set(Some(cur.id));
+                }
+            }
+
             if !actor_is_bot
                 && new_state.turn_phase == TurnPhase::TurnEnded
                 && new_state.players.len() > 1
             {
                 let delay_ms = if had_roll { 350 } else { 300 };
-                let task: std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>> =
+                let task: DeferredTask =
                     std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(move || {
                         if !is_local_mode.get_untracked() {
                             return;
@@ -183,6 +243,7 @@ fn execute_local_action(
                             ClientMessage::EndTurn,
                             local_state,
                             set_local_state,
+                            set_my_player_id,
                             is_local_mode,
                             is_rolling,
                             is_animating_move,
@@ -194,15 +255,12 @@ fn execute_local_action(
 
             let next_bot_id = if new_state.turn_phase == TurnPhase::Auction {
                 new_state.auction.as_ref().and_then(|auc| {
-                    auc.active_bidders
-                        .iter()
-                        .copied()
-                        .find(|bidder_id| {
-                            new_state
-                                .find_player(*bidder_id)
-                                .map(|p| p.is_bot_controlled)
-                                .unwrap_or(false)
-                        })
+                    auc.active_bidders.iter().copied().find(|bidder_id| {
+                        new_state
+                            .find_player(*bidder_id)
+                            .map(|p| p.is_bot_controlled)
+                            .unwrap_or(false)
+                    })
                 })
             } else {
                 new_state
@@ -213,7 +271,7 @@ fn execute_local_action(
 
             if let Some(bot_id) = next_bot_id {
                 let delay_ms = if had_roll { 450 } else { 550 };
-                let task: std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>> =
+                let task: DeferredTask =
                     std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(move || {
                         if !is_local_mode.get_untracked() {
                             return;
@@ -228,6 +286,7 @@ fn execute_local_action(
                                 bot_action,
                                 local_state,
                                 set_local_state,
+                                set_my_player_id,
                                 is_local_mode,
                                 is_rolling,
                                 is_animating_move,
@@ -249,16 +308,37 @@ fn execute_local_action(
 #[component]
 pub fn App() -> impl IntoView {
     let (view_mode, set_view_mode) = create_signal(ViewMode::Lobby);
+    let (lobby_tab, set_lobby_tab) = create_signal(LobbyTab::Online);
+    let (local_player_count, set_local_player_count) = create_signal(2usize);
+    let (local_slots, set_local_slots) = create_signal(vec![
+        LocalPlayerSlot {
+            name: "Người chơi 1".to_string(),
+            is_bot: false,
+        },
+        LocalPlayerSlot {
+            name: "Người chơi 2".to_string(),
+            is_bot: false,
+        },
+        LocalPlayerSlot {
+            name: "Người chơi 3".to_string(),
+            is_bot: false,
+        },
+        LocalPlayerSlot {
+            name: "Người chơi 4".to_string(),
+            is_bot: false,
+        },
+    ]);
     let (player_name, set_player_name) = create_signal("Nguyễn Minh".to_string());
     let (room_id, set_room_id) = create_signal("SGN-888".to_string());
     let (enable_auction_config, set_enable_auction_config) = create_signal(false);
     let (game_state, set_game_state) = create_signal(GameState::new());
     let (my_player_id, set_my_player_id) = create_signal::<Option<PlayerId>>(None);
-    let (_timer_seconds, set_timer_seconds) = create_signal(30u32);
+    let (timer_seconds, set_timer_seconds) = create_signal(120u32);
     let (logs, set_logs) = create_signal(vec!["Phiên bàn cờ đã sẵn sàng".to_string()]);
     let (show_history, set_show_history) = create_signal(false);
     let (show_rules, set_show_rules) = create_signal(false);
     let (selected_tile, set_selected_tile) = create_signal::<Option<u8>>(None);
+    let (sound_muted, set_sound_muted) = create_signal(false);
 
     // Animation signals for sequenced dice tumble, step-by-step pawn hopping, trail, and popups
     let (is_rolling, set_is_rolling) = create_signal(false);
@@ -270,7 +350,8 @@ pub fn App() -> impl IntoView {
     let (landing_tile_burst, set_landing_tile_burst) = create_signal::<Option<u8>>(None);
     let (recent_acquired_tile, set_recent_acquired_tile) = create_signal::<Option<u8>>(None);
     let (recent_house_tile, set_recent_house_tile) = create_signal::<Option<u8>>(None);
-    let (floating_popups, set_floating_popups) = create_signal::<Vec<BoardFloatingPopup>>(Vec::new());
+    let (floating_popups, set_floating_popups) =
+        create_signal::<Vec<BoardFloatingPopup>>(Vec::new());
     let (popup_seq, set_popup_seq) = create_signal(1u64);
     let (cash_delta_badge, set_cash_delta_badge) = create_signal::<Option<(String, bool)>>(None);
     let (drawn_card_banner, set_drawn_card_banner) =
@@ -278,8 +359,7 @@ pub fn App() -> impl IntoView {
 
     // Buffered state/card while dice tumble & pawn hops so UI updates right when landing
     let (pending_snapshot, set_pending_snapshot) = create_signal::<Option<GameState>>(None);
-    let (pending_card, set_pending_card) =
-        create_signal::<Option<(String, String, String)>>(None);
+    let (pending_card, set_pending_card) = create_signal::<Option<(String, String, String)>>(None);
 
     let (ws_client, set_ws_client) = create_signal::<Option<Rc<WsClient>>>(None);
     let (error_toast, set_error_toast) = create_signal::<Option<String>>(None);
@@ -338,7 +418,8 @@ pub fn App() -> impl IntoView {
     };
 
     let (is_local_mode, set_is_local_mode) = create_signal(false);
-    let (local_authoritative_state, set_local_authoritative_state) = create_signal(GameState::new());
+    let (local_authoritative_state, set_local_authoritative_state) =
+        create_signal(GameState::new());
 
     let process_server_message = Callback::new(move |server_msg: ServerMessage| match server_msg {
         ServerMessage::RoomJoined {
@@ -355,410 +436,401 @@ pub fn App() -> impl IntoView {
                 seat_index + 1
             ));
         }
-                ServerMessage::GameStarted { turn_order: _ } => {
-                    add_log("Ván đấu bắt đầu".to_string());
+        ServerMessage::GameStarted { turn_order: _ } => {
+            add_log("Ván đấu bắt đầu".to_string());
+        }
+        ServerMessage::TurnStarted {
+            active_player,
+            time_limit_seconds,
+        } => {
+            set_timer_seconds.set(time_limit_seconds);
+            let latest_state = pending_snapshot
+                .get_untracked()
+                .unwrap_or_else(|| game_state.get_untracked());
+            let name = latest_state
+                .find_player(active_player)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Người chơi".to_string());
+            add_log(format!("Đến lượt của {}", name));
+        }
+        ServerMessage::TimerTick { seconds_remaining } => {
+            set_timer_seconds.set(seconds_remaining);
+            if seconds_remaining <= 5 && seconds_remaining > 0 {
+                let is_my_turn = my_player_id.get_untracked().is_some()
+                    && game_state.get_untracked().current_player().map(|p| p.id)
+                        == my_player_id.get_untracked();
+                if is_my_turn {
+                    play_monopoly_sound("urgent");
                 }
-                ServerMessage::TurnStarted {
-                    active_player,
-                    time_limit_seconds,
-                } => {
-                    set_timer_seconds.set(time_limit_seconds);
-                    let latest_state = pending_snapshot
-                        .get_untracked()
-                        .unwrap_or_else(|| game_state.get_untracked());
-                    let name = latest_state
-                        .find_player(active_player)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_else(|| "Người chơi".to_string());
-                    add_log(format!("Đến lượt của {}", name));
+            }
+            if seconds_remaining == 30 {
+                let is_my_turn = my_player_id.get_untracked().is_some()
+                    && game_state.get_untracked().current_player().map(|p| p.id)
+                        == my_player_id.get_untracked();
+                if is_my_turn {
+                    let warn_msg = "Cảnh báo: Còn 30 giây trước khi hết lượt!".to_string();
+                    set_error_toast.set(Some(warn_msg.clone()));
+                    add_log(warn_msg);
                 }
-                ServerMessage::TimerTick { seconds_remaining } => {
-                    set_timer_seconds.set(seconds_remaining);
-                }
-                ServerMessage::DiceRolled {
-                    player_id,
-                    dice,
-                    new_tile_index,
-                    is_doubles,
-                } => {
-                    set_drawn_card_banner.set(None);
-                    set_pending_card.set(None);
-                    set_landing_tile_burst.set(None);
-                    set_step_trail.set(Vec::new());
-                    set_is_rolling.set(true);
-                    set_is_animating_move.set(true);
+            }
+        }
+        ServerMessage::DiceRolled {
+            player_id,
+            dice,
+            new_tile_index,
+            is_doubles,
+        } => {
+            play_monopoly_sound("roll");
+            set_drawn_card_banner.set(None);
+            set_pending_card.set(None);
+            set_landing_tile_burst.set(None);
+            set_step_trail.set(Vec::new());
+            set_is_rolling.set(true);
+            set_is_animating_move.set(true);
 
-                    let shuffle_faces: [(u8, u8); 7] = [
-                        (6, 2),
-                        (3, 5),
-                        (1, 4),
-                        (5, 6),
-                        (2, 3),
-                        (4, 1),
-                        (6, 5),
-                    ];
-                    for (frame_idx, pair) in shuffle_faces.into_iter().enumerate() {
-                        set_timeout(
-                            move || {
-                                if is_rolling.get_untracked() {
-                                    set_display_dice.set(pair);
-                                }
-                            },
-                            Duration::from_millis((frame_idx as u64) * 70),
-                        );
+            let shuffle_faces: [(u8, u8); 7] =
+                [(6, 2), (3, 5), (1, 4), (5, 6), (2, 3), (4, 1), (6, 5)];
+            for (frame_idx, pair) in shuffle_faces.into_iter().enumerate() {
+                set_timeout(
+                    move || {
+                        if is_rolling.get_untracked() {
+                            set_display_dice.set(pair);
+                        }
+                    },
+                    Duration::from_millis((frame_idx as u64) * 70),
+                );
+            }
+
+            let seat_idx = game_state
+                .get_untracked()
+                .players
+                .iter()
+                .position(|p| p.id == player_id)
+                .unwrap_or(0)
+                % 4;
+            let start_tile = visual_positions.get_untracked()[seat_idx];
+            let steps = ((new_tile_index + 40 - start_tile) % 40) as u64;
+
+            set_timeout(
+                move || {
+                    set_display_dice.set(dice);
+                    set_is_rolling.set(false);
+
+                    if steps == 0 {
+                        set_landing_tile_burst.set(Some(new_tile_index));
+                        set_selected_tile.set(Some(new_tile_index));
+                        set_hopping_seat.set(None);
+                        set_is_animating_move.set(false);
+                        if let Some(snap) = pending_snapshot.get_untracked() {
+                            set_pending_snapshot.set(None);
+                            commit_snapshot(snap);
+                        }
+                        return;
                     }
 
-                    let seat_idx = game_state
-                        .get_untracked()
-                        .players
-                        .iter()
-                        .position(|p| p.id == player_id)
-                        .unwrap_or(0)
-                        % 4;
-                    let start_tile = visual_positions.get_untracked()[seat_idx];
-                    let steps = ((new_tile_index + 40 - start_tile) % 40) as u64;
+                    set_hopping_seat.set(Some(seat_idx));
+                    for step in 1..=steps {
+                        let intermediate_tile = ((start_tile as u64 + step) % 40) as u8;
+                        let is_last_step = step == steps;
+                        set_timeout(
+                            move || {
+                                set_visual_positions.update(|positions| {
+                                    positions[seat_idx] = intermediate_tile;
+                                });
+                                set_step_trail.update(|trail| {
+                                    trail.push(intermediate_tile);
+                                    if trail.len() > 3 {
+                                        trail.remove(0);
+                                    }
+                                });
 
-                    set_timeout(
-                        move || {
-                            set_display_dice.set(dice);
-                            set_is_rolling.set(false);
-
-                            if steps == 0 {
-                                set_landing_tile_burst.set(Some(new_tile_index));
-                                set_selected_tile.set(Some(new_tile_index));
-                                set_hopping_seat.set(None);
-                                set_is_animating_move.set(false);
-                                if let Some(snap) = pending_snapshot.get_untracked() {
-                                    set_pending_snapshot.set(None);
-                                    commit_snapshot(snap);
+                                if intermediate_tile == 0 && new_tile_index != 10 {
+                                    spawn_board_popup(
+                                        0,
+                                        "+2.000.000 đ · Qua Khởi hành".to_string(),
+                                        true,
+                                    );
                                 }
-                                return;
-                            }
 
-                            set_hopping_seat.set(Some(seat_idx));
-                            for step in 1..=steps {
-                                let intermediate_tile = ((start_tile as u64 + step) % 40) as u8;
-                                let is_last_step = step == steps;
-                                set_timeout(
-                                    move || {
-                                        set_visual_positions.update(|positions| {
-                                            positions[seat_idx] = intermediate_tile;
-                                        });
-                                        set_step_trail.update(|trail| {
-                                            trail.push(intermediate_tile);
-                                            if trail.len() > 3 {
-                                                trail.remove(0);
-                                            }
-                                        });
+                                if is_last_step {
+                                    set_step_trail.set(Vec::new());
+                                    set_landing_tile_burst.set(Some(new_tile_index));
+                                    set_selected_tile.set(Some(new_tile_index));
 
-                                        if intermediate_tile == 0 && new_tile_index != 10 {
+                                    if let Some(card_info) = pending_card.get_untracked() {
+                                        set_pending_card.set(None);
+                                        set_drawn_card_banner.set(Some(card_info));
+                                        spawn_board_popup(
+                                            new_tile_index,
+                                            "Rút thẻ sự kiện".to_string(),
+                                            true,
+                                        );
+                                    }
+
+                                    let latest_snap = pending_snapshot
+                                        .get_untracked()
+                                        .unwrap_or_else(|| game_state.get_untracked());
+                                    let (final_server_pos, is_jailed) = latest_snap
+                                        .find_player(player_id)
+                                        .map(|p| (p.position, p.in_jail))
+                                        .unwrap_or((intermediate_tile, false));
+
+                                    if final_server_pos != intermediate_tile {
+                                        if is_jailed && final_server_pos == 10 {
+                                            play_monopoly_sound("jail");
                                             spawn_board_popup(
-                                                0,
-                                                "+2.000.000 đ · Qua Khởi hành".to_string(),
-                                                true,
+                                                intermediate_tile,
+                                                "Chuyển vào Khu tạm giam".to_string(),
+                                                false,
                                             );
-                                        }
-
-                                        if is_last_step {
-                                            set_step_trail.set(Vec::new());
-                                            set_landing_tile_burst.set(Some(new_tile_index));
-                                            set_selected_tile.set(Some(new_tile_index));
-
-                                            if let Some(card_info) = pending_card.get_untracked() {
-                                                set_pending_card.set(None);
-                                                set_drawn_card_banner.set(Some(card_info));
-                                                spawn_board_popup(
-                                                    new_tile_index,
-                                                    "Rút thẻ sự kiện".to_string(),
-                                                    true,
-                                                );
-                                            }
-
-                                            let latest_snap = pending_snapshot
-                                                .get_untracked()
-                                                .unwrap_or_else(|| game_state.get_untracked());
-                                            let (final_server_pos, is_jailed) = latest_snap
-                                                .find_player(player_id)
-                                                .map(|p| (p.position, p.in_jail))
-                                                .unwrap_or((intermediate_tile, false));
-
-                                            if final_server_pos != intermediate_tile {
-                                                if is_jailed && final_server_pos == 10 {
-                                                    spawn_board_popup(
-                                                        intermediate_tile,
-                                                        "Chuyển vào Khu tạm giam".to_string(),
-                                                        false,
-                                                    );
-                                                    set_timeout(
-                                                        move || {
-                                                            set_visual_positions.update(|positions| {
-                                                                positions[seat_idx] = 10;
-                                                            });
+                                            set_timeout(
+                                                move || {
+                                                    set_visual_positions.update(|positions| {
+                                                        positions[seat_idx] = 10;
+                                                    });
+                                                    set_hopping_seat.set(None);
+                                                    set_is_animating_move.set(false);
+                                                    set_landing_tile_burst.set(Some(10));
+                                                    set_selected_tile.set(Some(10));
+                                                    if let Some(snap) =
+                                                        pending_snapshot.get_untracked()
+                                                    {
+                                                        set_pending_snapshot.set(None);
+                                                        commit_snapshot(snap);
+                                                    }
+                                                },
+                                                Duration::from_millis(450),
+                                            );
+                                        } else {
+                                            let extra_steps =
+                                                ((final_server_pos + 40 - intermediate_tile) % 40)
+                                                    as u64;
+                                            for extra in 1..=extra_steps {
+                                                let next_t =
+                                                    ((intermediate_tile as u64 + extra) % 40) as u8;
+                                                let is_final_extra = extra == extra_steps;
+                                                set_timeout(
+                                                    move || {
+                                                        set_visual_positions.update(|positions| {
+                                                            positions[seat_idx] = next_t;
+                                                        });
+                                                        if next_t == 0 {
+                                                            spawn_board_popup(
+                                                                0,
+                                                                "+2.000.000 đ · Qua Khởi hành"
+                                                                    .to_string(),
+                                                                true,
+                                                            );
+                                                        }
+                                                        if is_final_extra {
                                                             set_hopping_seat.set(None);
                                                             set_is_animating_move.set(false);
-                                                            set_landing_tile_burst.set(Some(10));
-                                                            set_selected_tile.set(Some(10));
+                                                            set_landing_tile_burst
+                                                                .set(Some(final_server_pos));
+                                                            set_selected_tile
+                                                                .set(Some(final_server_pos));
                                                             if let Some(snap) =
                                                                 pending_snapshot.get_untracked()
                                                             {
                                                                 set_pending_snapshot.set(None);
                                                                 commit_snapshot(snap);
                                                             }
-                                                        },
-                                                        Duration::from_millis(450),
-                                                    );
-                                                } else {
-                                                    let extra_steps = ((final_server_pos + 40
-                                                        - intermediate_tile)
-                                                        % 40)
-                                                        as u64;
-                                                    for extra in 1..=extra_steps {
-                                                        let next_t = ((intermediate_tile as u64
-                                                            + extra)
-                                                            % 40)
-                                                            as u8;
-                                                        let is_final_extra = extra == extra_steps;
-                                                        set_timeout(
-                                                            move || {
-                                                                set_visual_positions.update(
-                                                                    |positions| {
-                                                                        positions[seat_idx] =
-                                                                            next_t;
-                                                                    },
-                                                                );
-                                                                if next_t == 0 {
-                                                                    spawn_board_popup(
-                                                                        0,
-                                                                        "+2.000.000 đ · Qua Khởi hành"
-                                                                            .to_string(),
-                                                                        true,
-                                                                    );
-                                                                }
-                                                                if is_final_extra {
-                                                                    set_hopping_seat.set(None);
-                                                                    set_is_animating_move
-                                                                        .set(false);
-                                                                    set_landing_tile_burst
-                                                                        .set(Some(final_server_pos));
-                                                                    set_selected_tile
-                                                                        .set(Some(final_server_pos));
-                                                                    if let Some(snap) =
-                                                                        pending_snapshot
-                                                                            .get_untracked()
-                                                                    {
-                                                                        set_pending_snapshot
-                                                                            .set(None);
-                                                                        commit_snapshot(snap);
-                                                                    }
-                                                                }
-                                                            },
-                                                            Duration::from_millis(
-                                                                380 + extra * 75,
-                                                            ),
-                                                        );
-                                                    }
-                                                }
-                                            } else {
-                                                if let Some(TileKind::Tax(t)) = get_board()
-                                                    .get(intermediate_tile as usize)
-                                                    .map(|tile| tile.kind.clone())
-                                                {
-                                                    spawn_board_popup(
-                                                        intermediate_tile,
-                                                        format!("-{} · Nộp thuế", t.amount),
-                                                        false,
-                                                    );
-                                                }
-
-                                                set_hopping_seat.set(None);
-                                                set_is_animating_move.set(false);
-                                                if let Some(snap) = pending_snapshot.get_untracked()
-                                                {
-                                                    set_pending_snapshot.set(None);
-                                                    commit_snapshot(snap);
-                                                }
+                                                        }
+                                                    },
+                                                    Duration::from_millis(380 + extra * 75),
+                                                );
                                             }
                                         }
-                                    },
-                                    Duration::from_millis(step * 110),
-                                );
-                            }
-                        },
-                        Duration::from_millis(520),
-                    );
+                                    } else {
+                                        if let Some(TileKind::Tax(t)) = get_board()
+                                            .get(intermediate_tile as usize)
+                                            .map(|tile| tile.kind.clone())
+                                        {
+                                            spawn_board_popup(
+                                                intermediate_tile,
+                                                format!("-{} · Nộp thuế", t.amount),
+                                                false,
+                                            );
+                                        }
 
-                    let name = game_state
-                        .get_untracked()
-                        .find_player(player_id)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_else(|| "Người chơi".to_string());
-                    let doubles_str = if is_doubles {
-                        " · Xúc xắc đôi"
-                    } else {
-                        ""
-                    };
-                    add_log(format!(
-                        "{} tung ({}, {}){} · Tới ô #{}",
-                        name, dice.0, dice.1, doubles_str, new_tile_index
-                    ));
-                }
-                ServerMessage::PropertyAcquired {
-                    player_id,
-                    tile_index,
-                    cost,
-                } => {
-                    set_recent_acquired_tile.set(Some(tile_index));
-                    set_landing_tile_burst.set(Some(tile_index));
-                    spawn_board_popup(
-                        tile_index,
-                        format!("Mua đất · -{}", cost),
-                        false,
-                    );
-                    set_timeout(
-                        move || {
-                            if recent_acquired_tile.get_untracked() == Some(tile_index) {
-                                set_recent_acquired_tile.set(None);
-                            }
-                        },
-                        Duration::from_millis(900),
-                    );
+                                        set_hopping_seat.set(None);
+                                        set_is_animating_move.set(false);
+                                        if let Some(snap) = pending_snapshot.get_untracked() {
+                                            set_pending_snapshot.set(None);
+                                            commit_snapshot(snap);
+                                        }
+                                    }
+                                }
+                            },
+                            Duration::from_millis(step * 110),
+                        );
+                    }
+                },
+                Duration::from_millis(520),
+            );
 
-                    let name = game_state
-                        .get_untracked()
-                        .find_player(player_id)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_else(|| "Người chơi".to_string());
-                    add_log(format!(
-                        "{} mua ô #{} với giá {}",
-                        name, tile_index, cost
-                    ));
-                }
-                ServerMessage::RentPaid {
-                    payer,
-                    recipient,
-                    tile_index,
-                    amount,
-                } => {
-                    spawn_board_popup(
-                        tile_index,
-                        format!("Tiền thuê · -{}", amount),
-                        false,
-                    );
-                    let p_name = game_state
-                        .get_untracked()
-                        .find_player(payer)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    let r_name = game_state
-                        .get_untracked()
-                        .find_player(recipient)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    add_log(format!(
-                        "{} trả {} tiền thuê ô #{} cho {}",
-                        p_name, amount, tile_index, r_name
-                    ));
-                }
-                ServerMessage::HouseModified {
-                    tile_index,
-                    house_count,
-                } => {
-                    set_recent_house_tile.set(Some(tile_index));
-                    set_landing_tile_burst.set(Some(tile_index));
-                    let label = if house_count == 5 {
-                        "Nâng cấp Khách sạn".to_string()
-                    } else {
-                        format!("Cấp nhà · {} căn", house_count)
-                    };
-                    spawn_board_popup(tile_index, label.clone(), true);
-                    set_timeout(
-                        move || {
-                            if recent_house_tile.get_untracked() == Some(tile_index) {
-                                set_recent_house_tile.set(None);
-                            }
-                        },
-                        Duration::from_millis(900),
-                    );
-                    add_log(format!("Ô #{} · {}", tile_index, label));
-                }
-                ServerMessage::PropertyMortgageChanged {
-                    tile_index,
-                    is_mortgaged,
-                } => {
-                    let msg = if is_mortgaged {
-                        "Đã thế chấp ngân hàng"
-                    } else {
-                        "Đã chuộc lại tài sản"
-                    };
-                    spawn_board_popup(tile_index, msg.to_string(), is_mortgaged);
-                    add_log(format!("{} tại ô #{}", msg, tile_index));
-                }
-                ServerMessage::CardDrawn {
-                    player_id: _,
-                    deck,
-                    description,
-                    effect_summary,
-                } => {
-                    let card_tuple = (
-                        deck.clone(),
-                        description.clone(),
-                        effect_summary.clone(),
-                    );
-                    if is_rolling.get_untracked() || is_animating_move.get_untracked() {
-                        set_pending_card.set(Some(card_tuple));
-                    } else {
-                        set_drawn_card_banner.set(Some(card_tuple));
+            let name = game_state
+                .get_untracked()
+                .find_player(player_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Người chơi".to_string());
+            let doubles_str = if is_doubles {
+                " · Xúc xắc đôi"
+            } else {
+                ""
+            };
+            add_log(format!(
+                "{} tung ({}, {}){} · Tới ô #{}",
+                name, dice.0, dice.1, doubles_str, new_tile_index
+            ));
+        }
+        ServerMessage::PropertyAcquired {
+            player_id,
+            tile_index,
+            cost,
+        } => {
+            play_monopoly_sound("buy");
+            set_recent_acquired_tile.set(Some(tile_index));
+            set_landing_tile_burst.set(Some(tile_index));
+            spawn_board_popup(tile_index, format!("Mua đất · -{}", cost), false);
+            set_timeout(
+                move || {
+                    if recent_acquired_tile.get_untracked() == Some(tile_index) {
+                        set_recent_acquired_tile.set(None);
                     }
-                    add_log(format!(
-                        "[{}] {}: {}",
-                        deck, description, effect_summary
-                    ));
-                }
-                ServerMessage::BotAssumedControl { player_id, reason } => {
-                    let name = game_state
-                        .get_untracked()
-                        .find_player(player_id)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    add_log(format!(
-                        "Hệ thống tự động đi thay lượt của {} ({})",
-                        name, reason
-                    ));
-                }
-                ServerMessage::SyncSnapshot { state } => {
-                    if let Ok(parsed) = serde_json::from_value::<GameState>(state) {
-                        if is_rolling.get_untracked() || is_animating_move.get_untracked() {
-                            set_pending_snapshot.set(Some(parsed));
-                        } else {
-                            let mut pos_arr = visual_positions.get_untracked();
-                            for (i, p) in parsed.players.iter().enumerate().take(4) {
-                                pos_arr[i] = p.position;
-                            }
-                            set_visual_positions.set(pos_arr);
-                            set_display_dice.set(parsed.last_dice);
-                            commit_snapshot(parsed);
-                        }
+                },
+                Duration::from_millis(900),
+            );
+
+            let name = game_state
+                .get_untracked()
+                .find_player(player_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Người chơi".to_string());
+            add_log(format!("{} mua ô #{} với giá {}", name, tile_index, cost));
+        }
+        ServerMessage::RentPaid {
+            payer,
+            recipient,
+            tile_index,
+            amount,
+        } => {
+            let my_id_now = my_player_id.get_untracked();
+            if my_id_now == Some(recipient) {
+                play_monopoly_sound("cash_in");
+            } else if my_id_now == Some(payer) {
+                play_monopoly_sound("cash_out");
+            }
+            spawn_board_popup(tile_index, format!("Tiền thuê · -{}", amount), false);
+            let p_name = game_state
+                .get_untracked()
+                .find_player(payer)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            let r_name = game_state
+                .get_untracked()
+                .find_player(recipient)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            add_log(format!(
+                "{} trả {} tiền thuê ô #{} cho {}",
+                p_name, amount, tile_index, r_name
+            ));
+        }
+        ServerMessage::HouseModified {
+            tile_index,
+            house_count,
+        } => {
+            play_monopoly_sound("buy");
+            set_recent_house_tile.set(Some(tile_index));
+            set_landing_tile_burst.set(Some(tile_index));
+            let label = if house_count == 5 {
+                "Nâng cấp Khách sạn".to_string()
+            } else {
+                format!("Cấp nhà · {} căn", house_count)
+            };
+            spawn_board_popup(tile_index, label.clone(), true);
+            set_timeout(
+                move || {
+                    if recent_house_tile.get_untracked() == Some(tile_index) {
+                        set_recent_house_tile.set(None);
                     }
+                },
+                Duration::from_millis(900),
+            );
+            add_log(format!("Ô #{} · {}", tile_index, label));
+        }
+        ServerMessage::PropertyMortgageChanged {
+            tile_index,
+            is_mortgaged,
+        } => {
+            let msg = if is_mortgaged {
+                "Đã thế chấp ngân hàng"
+            } else {
+                "Đã chuộc lại tài sản"
+            };
+            spawn_board_popup(tile_index, msg.to_string(), is_mortgaged);
+            add_log(format!("{} tại ô #{}", msg, tile_index));
+        }
+        ServerMessage::CardDrawn {
+            player_id: _,
+            deck,
+            description,
+            effect_summary,
+        } => {
+            let card_tuple = (deck.clone(), description.clone(), effect_summary.clone());
+            if is_rolling.get_untracked() || is_animating_move.get_untracked() {
+                set_pending_card.set(Some(card_tuple));
+            } else {
+                set_drawn_card_banner.set(Some(card_tuple));
+            }
+            add_log(format!("[{}] {}: {}", deck, description, effect_summary));
+        }
+        ServerMessage::BotAssumedControl { player_id, reason } => {
+            let name = game_state
+                .get_untracked()
+                .find_player(player_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            add_log(format!(
+                "Hệ thống tự động đi thay lượt của {} ({})",
+                name, reason
+            ));
+        }
+        ServerMessage::SyncSnapshot { state } => {
+            if let Ok(parsed) = serde_json::from_value::<GameState>(state) {
+                if is_rolling.get_untracked() || is_animating_move.get_untracked() {
+                    set_pending_snapshot.set(Some(parsed));
+                } else {
+                    let mut pos_arr = visual_positions.get_untracked();
+                    for (i, p) in parsed.players.iter().enumerate().take(4) {
+                        pos_arr[i] = p.position;
+                    }
+                    set_visual_positions.set(pos_arr);
+                    set_display_dice.set(parsed.last_dice);
+                    commit_snapshot(parsed);
                 }
-                ServerMessage::ActionRejected { reason } => {
-                    set_is_rolling.set(false);
-                    set_is_animating_move.set(false);
-                    set_hopping_seat.set(None);
-                    set_error_toast.set(Some(reason.clone()));
-                    add_log(format!("Thao tác bị từ chối: {}", reason));
-                }
-                ServerMessage::PlayerBankrupt { player_id } => {
-                    let name = game_state
-                        .get_untracked()
-                        .find_player(player_id)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    add_log(format!("{} đã phá sản", name));
-                }
-                _ => {}
+            }
+        }
+        ServerMessage::ActionRejected { reason } => {
+            set_is_rolling.set(false);
+            set_is_animating_move.set(false);
+            set_hopping_seat.set(None);
+            set_error_toast.set(Some(reason.clone()));
+            add_log(format!("Thao tác bị từ chối: {}", reason));
+        }
+        ServerMessage::PlayerBankrupt { player_id } => {
+            let name = game_state
+                .get_untracked()
+                .find_player(player_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            add_log(format!("{} đã phá sản", name));
+        }
+        _ => {}
     });
 
-    let start_local_game = move |with_bots: bool| {
+    let start_local_game_custom = move |slots: Vec<LocalPlayerSlot>| {
         set_ws_client.set(None);
         set_is_local_mode.set(true);
         set_selected_tile.set(None);
@@ -772,10 +844,11 @@ pub fn App() -> impl IntoView {
         set_drawn_card_banner.set(None);
         set_pending_snapshot.set(None);
         set_pending_card.set(None);
-        set_timer_seconds.set(30);
+        set_timer_seconds.set(120);
 
         let mut st = GameState::new();
-        st.config.enable_auction = if with_bots {
+        let count = slots.len().clamp(1, 4);
+        st.config.enable_auction = if count > 1 {
             enable_auction_config.get_untracked()
         } else {
             false
@@ -783,6 +856,63 @@ pub fn App() -> impl IntoView {
         st.is_game_started = true;
         st.turn_phase = TurnPhase::WaitingForRoll;
 
+        let mut first_human_id = None;
+        for (idx, slot) in slots.into_iter().take(4).enumerate() {
+            let trimmed = slot.name.trim().to_string();
+            let final_name = if trimmed.is_empty() {
+                if slot.is_bot {
+                    format!("Máy AI {}", idx + 1)
+                } else {
+                    format!("Người chơi {}", idx + 1)
+                }
+            } else {
+                trimmed
+            };
+            let pid = PlayerId(uuid::Uuid::new_v4());
+            let mut player = PlayerState::new(pid, final_name, idx as u8, None);
+            player.is_bot_controlled = slot.is_bot && idx > 0;
+            if !player.is_bot_controlled && first_human_id.is_none() {
+                first_human_id = Some(pid);
+            }
+            st.players.push(player);
+            st.turn_order.push(pid);
+        }
+
+        let first_name = st
+            .players
+            .first()
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| "Người chơi 1".to_string());
+        let bot_count = st.players.iter().filter(|p| p.is_bot_controlled).count();
+        let human_count = st.players.len().saturating_sub(bot_count);
+
+        if st.players.len() == 1 {
+            set_room_id.set("SOLO-1P".to_string());
+            set_logs.set(vec![format!(
+                "Chế độ chơi thử 1 người (Solo) đã sẵn sàng · Lượt của {}",
+                first_name
+            )]);
+        } else if bot_count == 0 {
+            set_room_id.set(format!("LOCAL-{}P", human_count));
+            set_logs.set(vec![format!(
+                "Chế độ {} người chơi trên cùng máy đã sẵn sàng · Lượt của {}",
+                human_count, first_name
+            )]);
+        } else {
+            set_room_id.set(format!("LOCAL-{}H{}AI", human_count, bot_count));
+            set_logs.set(vec![format!(
+                "Ván nội bộ ({} người + {} máy AI) đã sẵn sàng · Lượt của {}",
+                human_count, bot_count, first_name
+            )]);
+        }
+
+        set_my_player_id.set(first_human_id);
+        set_local_authoritative_state.set(st.clone());
+        set_game_state.set(st);
+        set_view_mode.set(ViewMode::Game);
+    };
+
+    let start_local_game = move |with_bots: bool| {
         let human_name = {
             let trimmed = player_name.get_untracked().trim().to_string();
             if trimmed.is_empty() {
@@ -791,30 +921,19 @@ pub fn App() -> impl IntoView {
                 trimmed
             }
         };
-        let human_id = PlayerId(uuid::Uuid::new_v4());
-        st.players.push(PlayerState::new(human_id, human_name.clone(), 0, None));
-        st.turn_order.push(human_id);
-
+        let mut slots = vec![LocalPlayerSlot {
+            name: human_name,
+            is_bot: false,
+        }];
         if with_bots {
-            let bot_names = ["Máy Phú Nhuận", "Máy Chợ Lớn", "Máy Thảo Điền"];
-            for (idx, bot_name) in bot_names.into_iter().enumerate() {
-                let bot_id = PlayerId(uuid::Uuid::new_v4());
-                let mut bot = PlayerState::new(bot_id, bot_name.to_string(), (idx + 1) as u8, None);
-                bot.is_bot_controlled = true;
-                st.players.push(bot);
-                st.turn_order.push(bot_id);
+            for bot_name in ["Máy Phú Nhuận", "Máy Chợ Lớn", "Máy Thảo Điền"] {
+                slots.push(LocalPlayerSlot {
+                    name: bot_name.to_string(),
+                    is_bot: true,
+                });
             }
-            set_room_id.set("SOLO-AI".to_string());
-            set_logs.set(vec![format!("Chế độ 1 người + 3 máy AI đã sẵn sàng · Lượt của {}", human_name)]);
-        } else {
-            set_room_id.set("SOLO-1P".to_string());
-            set_logs.set(vec![format!("Chế độ chơi thử 1 người (Solo) đã sẵn sàng · Lượt của {}", human_name)]);
         }
-
-        set_my_player_id.set(Some(human_id));
-        set_local_authoritative_state.set(st.clone());
-        set_game_state.set(st);
-        set_view_mode.set(ViewMode::Game);
+        start_local_game_custom(slots);
     };
 
     let connect_to_room = move |target_room: String, name: String, auction_enabled: bool| {
@@ -874,6 +993,7 @@ pub fn App() -> impl IntoView {
                     action,
                     local_authoritative_state,
                     set_local_authoritative_state,
+                    set_my_player_id,
                     is_local_mode,
                     is_rolling,
                     is_animating_move,
@@ -922,6 +1042,40 @@ pub fn App() -> impl IntoView {
                 TurnPhase::WaitingForRoll => handle_action.call(ClientMessage::RollDice),
                 TurnPhase::TurnEnded => handle_action.call(ClientMessage::EndTurn),
                 _ => {}
+            }
+        }
+    });
+
+    let _keydown_handle = window_event_listener(ev::keydown, move |ev| {
+        let key = ev.key();
+        if key == "Escape" {
+            set_selected_tile.set(None);
+            set_show_history.set(false);
+            set_show_rules.set(false);
+            return;
+        }
+        if key == " " && view_mode.get_untracked() == ViewMode::Game {
+            if let Some(target) = ev
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+            {
+                let tag = target.tag_name();
+                if tag == "INPUT" || tag == "TEXTAREA" || tag == "BUTTON" {
+                    return;
+                }
+            }
+            let st = game_state.get_untracked();
+            let my_id = my_player_id.get_untracked();
+            let is_my_turn = my_id.is_some() && st.current_player().map(|p| p.id) == my_id;
+            if is_my_turn
+                && st.is_game_started
+                && !st.is_game_over
+                && !is_rolling.get_untracked()
+                && !is_animating_move.get_untracked()
+                && st.turn_phase == TurnPhase::WaitingForRoll
+            {
+                ev.prevent_default();
+                trigger_roll_dice.call(());
             }
         }
     });
@@ -1006,6 +1160,23 @@ pub fn App() -> impl IntoView {
                                     class="btn-outline"
                                     style=format!(
                                         "font-size: 12px; line-height: 16px; height: 32px; background: {}; color: {}; border: 1px solid {}; padding: 0 10px; border-radius: 8px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;",
+                                        BG_SECONDARY,
+                                        if sound_muted.get() { TEXT_MUTED } else { TEXT_PRIMARY },
+                                        BORDER_DEFAULT
+                                    )
+                                    title="Bật/tắt âm thanh"
+                                    on:click=move |_| {
+                                        let next = !sound_muted.get_untracked();
+                                        set_sound_muted.set(next);
+                                        set_monopoly_sound_muted(next);
+                                    }
+                                >
+                                    <span>{move || if sound_muted.get() { "Âm: Tắt" } else { "Âm: Bật" }}</span>
+                                </button>
+                                <button
+                                    class="btn-outline"
+                                    style=format!(
+                                        "font-size: 12px; line-height: 16px; height: 32px; background: {}; color: {}; border: 1px solid {}; padding: 0 10px; border-radius: 8px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;",
                                         if history_open { SURFACE_HOVER } else { BG_SECONDARY },
                                         if history_open { TEXT_PRIMARY } else { TEXT_SECONDARY },
                                         BORDER_DEFAULT
@@ -1079,118 +1250,245 @@ pub fn App() -> impl IntoView {
                                                 "Đầu tư và đấu giá qua 8 quận nội thành Sài Gòn"
                                             </h1>
                                             <p style=format!("color: {}; font-size: 14px; line-height: 20px;", TEXT_SECONDARY)>
-                                                "Ván đấu trực tuyến 2 đến 4 người chơi theo chuẩn khế ước địa ốc, hỗ trợ đấu giá công khai khi bỏ qua quyền mua và tự động đi thay khi hết 30 giây"
+                                                "Ván đấu trực tuyến 2 đến 4 người chơi theo chuẩn khế ước địa ốc, hỗ trợ đấu giá công khai khi bỏ qua quyền mua và tự động đi thay khi hết 2 phút"
                                             </p>
                                         </div>
 
                                         <div class="panel" style="padding: 24px; gap: 16px;">
-                                            <div style="display: flex; flex-direction: column; gap: 8px;">
-                                                <label style=format!("font-size: 13px; line-height: 20px; font-weight: 500; color: {};", TEXT_SECONDARY)>
-                                                    "Tên người chơi"
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    prop:value=player_name
-                                                    on:input=move |ev| set_player_name.set(event_target_value(&ev))
-                                                />
+                                            <div class="lobby-tabs">
+                                                <button
+                                                    class=move || if lobby_tab.get() == LobbyTab::Online { "lobby-tab active" } else { "lobby-tab" }
+                                                    on:click=move |_| set_lobby_tab.set(LobbyTab::Online)
+                                                >
+                                                    "Trực tuyến (Online)"
+                                                </button>
+                                                <button
+                                                    class=move || if lobby_tab.get() == LobbyTab::Local { "lobby-tab active" } else { "lobby-tab" }
+                                                    on:click=move |_| set_lobby_tab.set(LobbyTab::Local)
+                                                >
+                                                    "Cùng máy / AI"
+                                                </button>
                                             </div>
 
-                                            <div style="display: flex; flex-direction: column; gap: 8px;">
-                                                <label style=format!("font-size: 13px; line-height: 20px; font-weight: 500; color: {};", TEXT_SECONDARY)>
-                                                    "Mã phòng"
-                                                </label>
-                                                <input
-                                                    class="mono"
-                                                    type="text"
-                                                    prop:value=room_id
-                                                    on:input=move |ev| set_room_id.set(event_target_value(&ev))
-                                                />
-                                            </div>
+                                            {move || match lobby_tab.get() {
+                                                LobbyTab::Online => view! {
+                                                    <div style="display: flex; flex-direction: column; gap: 16px;">
+                                                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                            <label style=format!("font-size: 13px; line-height: 20px; font-weight: 500; color: {};", TEXT_SECONDARY)>
+                                                                "Tên người chơi"
+                                                            </label>
+                                                            <input
+                                                                type="text"
+                                                                prop:value=player_name
+                                                                on:input=move |ev| set_player_name.set(event_target_value(&ev))
+                                                            />
+                                                        </div>
 
-                                            <div
-                                                style=format!(
-                                                    "padding: 12px; border-radius: 8px; background: {}; border: 1px solid {}; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer;",
-                                                    BG_SECONDARY, BORDER_DEFAULT
-                                                )
-                                                on:click=move |_| set_enable_auction_config.update(|v| *v = !*v)
-                                            >
-                                                <div style="display: flex; flex-direction: column; gap: 4px;">
-                                                    <span style=format!("font-size: 14px; line-height: 20px; font-weight: 500; color: {};", TEXT_PRIMARY)>
-                                                        "Đấu giá khi bỏ lượt mua"
-                                                    </span>
-                                                    <span style=format!("font-size: 12px; line-height: 16px; color: {};", TEXT_MUTED)>
-                                                        {move || if enable_auction_config.get() {
-                                                            "Mở phiên trả giá công khai cho cả bàn khi không mua đất"
+                                                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                            <label style=format!("font-size: 13px; line-height: 20px; font-weight: 500; color: {};", TEXT_SECONDARY)>
+                                                                "Mã phòng"
+                                                            </label>
+                                                            <input
+                                                                class="mono"
+                                                                type="text"
+                                                                prop:value=room_id
+                                                                on:input=move |ev| set_room_id.set(event_target_value(&ev))
+                                                            />
+                                                        </div>
+
+                                                        <div
+                                                            style=format!(
+                                                                "padding: 12px; border-radius: 8px; background: {}; border: 1px solid {}; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer;",
+                                                                BG_SECONDARY, BORDER_DEFAULT
+                                                            )
+                                                            on:click=move |_| set_enable_auction_config.update(|v| *v = !*v)
+                                                        >
+                                                            <div style="display: flex; flex-direction: column; gap: 4px;">
+                                                                <span style=format!("font-size: 14px; line-height: 20px; font-weight: 500; color: {};", TEXT_PRIMARY)>
+                                                                    "Đấu giá khi bỏ lượt mua"
+                                                                </span>
+                                                                <span style=format!("font-size: 12px; line-height: 16px; color: {};", TEXT_MUTED)>
+                                                                    {move || if enable_auction_config.get() {
+                                                                        "Mở phiên trả giá công khai cho cả bàn khi không mua đất"
+                                                                    } else {
+                                                                        "Kết thúc lượt ngay khi người chơi từ chối mua đất"
+                                                                    }}
+                                                                </span>
+                                                            </div>
+                                                            <div style=format!(
+                                                                "padding: 4px 8px; border-radius: 4px; background: {}; border: 1px solid {}; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;",
+                                                                SURFACE_HOVER, BORDER_DEFAULT
+                                                            )>
+                                                                <span style=move || format!(
+                                                                    "width: 6px; height: 6px; border-radius: 50%; background: {};",
+                                                                    if enable_auction_config.get() { STATUS_SUCCESS } else { TEXT_MUTED }
+                                                                )></span>
+                                                                <span class="mono" style=move || format!(
+                                                                    "font-size: 12px; line-height: 16px; font-weight: 500; color: {};",
+                                                                    if enable_auction_config.get() { TEXT_PRIMARY } else { TEXT_MUTED }
+                                                                )>
+                                                                    {move || if enable_auction_config.get() { "Đang bật" } else { "Đang tắt" }}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        <div style="display: flex; gap: 12px; margin-top: 4px;">
+                                                            <button
+                                                                class="btn"
+                                                                style="flex: 1;"
+                                                                on:click=move |_| {
+                                                                    connect_to_room(room_id.get(), player_name.get(), enable_auction_config.get());
+                                                                }
+                                                            >
+                                                                "Vào phòng"
+                                                            </button>
+                                                            <button
+                                                                class="btn btn-secondary"
+                                                                style="flex: 1;"
+                                                                on:click=move |_| {
+                                                                    let p_name = player_name.get();
+                                                                    let auction_opt = enable_auction_config.get();
+                                                                    spawn_local(async move {
+                                                                        let generated_room = format!("SGN-{}", uuid::Uuid::new_v4().to_string()[..4].to_uppercase());
+                                                                        set_room_id.set(generated_room.clone());
+                                                                        connect_to_room(generated_room, p_name, auction_opt);
+                                                                    });
+                                                                }
+                                                            >
+                                                                "Tạo phòng mới"
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                }.into_view(),
+                                                LobbyTab::Local => view! {
+                                                    <div style="display: flex; flex-direction: column; gap: 14px;">
+                                                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                            <label style=format!("font-size: 13px; line-height: 20px; font-weight: 500; color: {};", TEXT_SECONDARY)>
+                                                                "Số người chơi trên bàn"
+                                                            </label>
+                                                            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+                                                                {[1usize, 2, 3, 4].into_iter().map(|cnt| {
+                                                                    let label = if cnt == 1 { "1 (Solo)".to_string() } else { format!("{} Người", cnt) };
+                                                                    view! {
+                                                                        <button
+                                                                            class=move || if local_player_count.get() == cnt { "btn" } else { "btn btn-outline" }
+                                                                            style="min-height: 36px; font-size: 13px; padding: 0 8px;"
+                                                                            on:click=move |_| set_local_player_count.set(cnt)
+                                                                        >
+                                                                            {label}
+                                                                        </button>
+                                                                    }
+                                                                }).collect_view()}
+                                                            </div>
+                                                        </div>
+
+                                                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                            {move || {
+                                                                let cnt = local_player_count.get();
+                                                                let slots = local_slots.get();
+                                                                (0..cnt).map(|idx| {
+                                                                    let slot = slots[idx].clone();
+                                                                    view! {
+                                                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                                                            <PlayerAvatar seat_idx=idx size=28 />
+                                                                            <input
+                                                                                type="text"
+                                                                                style="flex: 1; min-width: 0;"
+                                                                                prop:value=slot.name
+                                                                                on:input=move |ev| {
+                                                                                    let val = event_target_value(&ev);
+                                                                                    set_local_slots.update(|list| {
+                                                                                        if let Some(item) = list.get_mut(idx) {
+                                                                                            item.name = val;
+                                                                                        }
+                                                                                    });
+                                                                                }
+                                                                            />
+                                                                            {if idx > 0 {
+                                                                                let is_bot = slot.is_bot;
+                                                                                view! {
+                                                                                    <button
+                                                                                        class="btn btn-outline"
+                                                                                        style=format!(
+                                                                                            "min-height: 36px; width: 88px; font-size: 12px; padding: 0 8px; flex-shrink: 0; color: {};",
+                                                                                            if is_bot { STATUS_WARNING } else { STATUS_SUCCESS }
+                                                                                        )
+                                                                                        on:click=move |_| {
+                                                                                            set_local_slots.update(|list| {
+                                                                                                if let Some(item) = list.get_mut(idx) {
+                                                                                                    item.is_bot = !item.is_bot;
+                                                                                                    if item.is_bot && item.name.starts_with("Người chơi") {
+                                                                                                        let bot_defaults = ["", "Máy Phú Nhuận", "Máy Chợ Lớn", "Máy Thảo Điền"];
+                                                                                                        item.name = bot_defaults[idx].to_string();
+                                                                                                    } else if !item.is_bot && item.name.starts_with("Máy ") {
+                                                                                                        item.name = format!("Người chơi {}", idx + 1);
+                                                                                                    }
+                                                                                                }
+                                                                                            });
+                                                                                        }
+                                                                                    >
+                                                                                        {if is_bot { "Máy AI" } else { "Người" }}
+                                                                                    </button>
+                                                                                }.into_view()
+                                                                            } else {
+                                                                                view! {
+                                                                                    <span class="mono" style=format!("width: 88px; text-align: center; font-size: 12px; color: {}; flex-shrink: 0;", TEXT_MUTED)>
+                                                                                        "Chủ bàn"
+                                                                                    </span>
+                                                                                }.into_view()
+                                                                            }}
+                                                                        </div>
+                                                                    }
+                                                                }).collect_view()
+                                                            }}
+                                                        </div>
+
+                                                        {move || if local_player_count.get() > 1 {
+                                                            view! {
+                                                                <div
+                                                                    style=format!(
+                                                                        "padding: 10px 12px; border-radius: 8px; background: {}; border: 1px solid {}; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer;",
+                                                                        BG_SECONDARY, BORDER_DEFAULT
+                                                                    )
+                                                                    on:click=move |_| set_enable_auction_config.update(|v| *v = !*v)
+                                                                >
+                                                                    <span style=format!("font-size: 13px; font-weight: 500; color: {};", TEXT_PRIMARY)>
+                                                                        "Đấu giá khi bỏ lượt mua"
+                                                                    </span>
+                                                                    <span class="mono" style=move || format!(
+                                                                        "font-size: 12px; font-weight: 500; color: {};",
+                                                                        if enable_auction_config.get() { STATUS_SUCCESS } else { TEXT_MUTED }
+                                                                    )>
+                                                                        {move || if enable_auction_config.get() { "Đang bật" } else { "Đang tắt" }}
+                                                                    </span>
+                                                                </div>
+                                                            }.into_view()
                                                         } else {
-                                                            "Kết thúc lượt ngay khi người chơi từ chối mua đất"
+                                                            view! {}.into_view()
                                                         }}
-                                                    </span>
-                                                </div>
-                                                <div style=format!(
-                                                    "padding: 4px 8px; border-radius: 4px; background: {}; border: 1px solid {}; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;",
-                                                    SURFACE_HOVER, BORDER_DEFAULT
-                                                )>
-                                                    <span style=move || format!(
-                                                        "width: 6px; height: 6px; border-radius: 50%; background: {};",
-                                                        if enable_auction_config.get() { STATUS_SUCCESS } else { TEXT_MUTED }
-                                                    )></span>
-                                                    <span class="mono" style=move || format!(
-                                                        "font-size: 12px; line-height: 16px; font-weight: 500; color: {};",
-                                                        if enable_auction_config.get() { TEXT_PRIMARY } else { TEXT_MUTED }
-                                                    )>
-                                                        {move || if enable_auction_config.get() { "Đang bật" } else { "Đang tắt" }}
-                                                    </span>
-                                                </div>
-                                            </div>
 
-                                            <div style="display: flex; gap: 12px; margin-top: 4px;">
-                                                <button
-                                                    class="btn"
-                                                    style="flex: 1;"
-                                                    on:click=move |_| {
-                                                        connect_to_room(room_id.get(), player_name.get(), enable_auction_config.get());
-                                                    }
-                                                >
-                                                    "Vào phòng"
-                                                </button>
-                                                <button
-                                                    class="btn btn-secondary"
-                                                    style="flex: 1;"
-                                                    on:click=move |_| {
-                                                        let p_name = player_name.get();
-                                                        let auction_opt = enable_auction_config.get();
-                                                        spawn_local(async move {
-                                                            let generated_room = format!("SGN-{}", uuid::Uuid::new_v4().to_string()[..4].to_uppercase());
-                                                            set_room_id.set(generated_room.clone());
-                                                            connect_to_room(generated_room, p_name, auction_opt);
-                                                        });
-                                                    }
-                                                >
-                                                    "Tạo phòng mới"
-                                                </button>
-                                            </div>
-
-                                            <div style=format!("border-top: 1px solid {}; padding-top: 12px; display: flex; flex-direction: column; gap: 8px;", BORDER_DEFAULT)>
-                                                <span class="mono" style=format!("font-size: 11px; line-height: 16px; color: {};", TEXT_MUTED)>
-                                                    "Chơi thử ngoại tuyến (1 người)"
-                                                </span>
-                                                <div style="display: flex; gap: 12px;">
-                                                    <button
-                                                        class="btn btn-secondary"
-                                                        style="flex: 1;"
-                                                        on:click=move |_| start_local_game(false)
-                                                    >
-                                                        "Chơi thử 1 người (Solo)"
-                                                    </button>
-                                                    <button
-                                                        class="btn btn-outline"
-                                                        style="flex: 1;"
-                                                        on:click=move |_| start_local_game(true)
-                                                    >
-                                                        "1 Người + 3 Máy AI"
-                                                    </button>
-                                                </div>
-                                            </div>
+                                                        <div style="display: flex; gap: 10px; margin-top: 2px;">
+                                                            <button
+                                                                class="btn"
+                                                                style="flex: 1;"
+                                                                on:click=move |_| {
+                                                                    let cnt = local_player_count.get_untracked();
+                                                                    let slots = local_slots.get_untracked().into_iter().take(cnt).collect();
+                                                                    start_local_game_custom(slots);
+                                                                }
+                                                            >
+                                                                "Bắt đầu ván đấu"
+                                                            </button>
+                                                            <button
+                                                                class="btn btn-secondary"
+                                                                on:click=move |_| start_local_game(true)
+                                                            >
+                                                                "1P + 3 AI"
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                }.into_view(),
+                                            }}
                                         </div>
                                     </div>
 
@@ -1284,10 +1582,106 @@ pub fn App() -> impl IntoView {
                     ViewMode::Game => {
                         view! {
                             <div class="game-layout">
+                                {move || {
+                                    let st = game_state.get();
+                                    if !st.is_game_started {
+                                        return view! {}.into_view();
+                                    }
+                                    let cur_id = st.current_player().map(|p| p.id);
+                                    let my_id = my_player_id.get();
+                                    view! {
+                                        <div class="standings-strip">
+                                            {st.players.iter().enumerate().map(|(idx, p)| {
+                                                let is_active = cur_id == Some(p.id);
+                                                let is_me = my_id == Some(p.id);
+                                                let cls = if p.is_bankrupt {
+                                                    "standing-pill bankrupt"
+                                                } else if is_active {
+                                                    "standing-pill active"
+                                                } else {
+                                                    "standing-pill"
+                                                };
+                                                let tag = if p.is_bot_controlled {
+                                                    " · AI"
+                                                } else if is_me {
+                                                    " · Bạn"
+                                                } else if !p.is_connected {
+                                                    " · Mất kết nối"
+                                                } else if p.in_jail {
+                                                    " · Tạm giam"
+                                                } else {
+                                                    ""
+                                                };
+
+                                                let all_districts = [
+                                                    District::District4,
+                                                    District::District8,
+                                                    District::PhuNhuan,
+                                                    District::TanBinh,
+                                                    District::District5,
+                                                    District::District3,
+                                                    District::District2,
+                                                    District::District1,
+                                                ];
+                                                let board_tiles = get_board();
+                                                let owned_districts: Vec<(District, bool)> = all_districts
+                                                    .into_iter()
+                                                    .filter_map(|d| {
+                                                        let has_any = board_tiles.iter().any(|t| {
+                                                            matches!(&t.kind, TileKind::Property(pr) if pr.district == d)
+                                                                && st.properties[t.index as usize].owner == Some(p.id)
+                                                        });
+                                                        if has_any {
+                                                            Some((d, st.owns_full_district(p.id, d)))
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                                    .collect();
+
+                                                view! {
+                                                    <div class=cls>
+                                                        <PlayerAvatar seat_idx=idx size=24 />
+                                                        <div style="display: flex; flex-direction: column; line-height: 1.15;">
+                                                            <span style=format!("font-size: 12px; font-weight: 600; color: {};", TEXT_PRIMARY)>
+                                                                {format!("{}{}", p.name, tag)}
+                                                            </span>
+                                                            <span class="mono" style=format!(
+                                                                "font-size: 11px; color: {};",
+                                                                if p.is_bankrupt { STATUS_DANGER } else if is_active { STATUS_WARNING } else { TEXT_SECONDARY }
+                                                            )>
+                                                                {if p.is_bankrupt { "Phá sản".to_string() } else { p.cash.to_string() }}
+                                                            </span>
+                                                            {if !owned_districts.is_empty() {
+                                                                view! {
+                                                                    <div class="standing-districts">
+                                                                        {owned_districts.into_iter().map(|(d, is_mono)| {
+                                                                            let d_cls = if is_mono { "standing-district-bar monopoly" } else { "standing-district-bar" };
+                                                                            view! {
+                                                                                <span
+                                                                                    class=d_cls
+                                                                                    style=format!("background: {};", get_district_color(d))
+                                                                                ></span>
+                                                                            }
+                                                                        }).collect_view()}
+                                                                    </div>
+                                                                }.into_view()
+                                                            } else {
+                                                                view! {}.into_view()
+                                                            }}
+                                                        </div>
+                                                    </div>
+                                                }
+                                            }).collect_view()}
+                                        </div>
+                                    }.into_view()
+                                }}
+
                                 <Board
                                     state=game_state
                                     selected_tile=selected_tile
                                     is_rolling=is_rolling
+                                    is_animating_move=is_animating_move
                                     display_dice=display_dice
                                     visual_positions=visual_positions
                                     hopping_seat=hopping_seat
@@ -1297,13 +1691,130 @@ pub fn App() -> impl IntoView {
                                     recent_house_tile=recent_house_tile
                                     floating_popups=floating_popups
                                     drawn_card_banner=drawn_card_banner
+                                    my_player_id=my_player_id
+                                    timer_seconds=timer_seconds
+                                    is_local_mode=is_local_mode
                                     on_tile_click=Some(Callback::new(move |idx| {
                                         set_selected_tile.update(|cur| {
                                             *cur = if *cur == Some(idx) { None } else { Some(idx) };
                                         });
                                     }))
                                     on_roll_dice=Some(trigger_roll_dice)
+                                    on_action=Some(handle_action)
                                 />
+
+                                {move || {
+                                    let st = game_state.get();
+                                    if is_local_mode.get() || st.is_game_started {
+                                        return view! {}.into_view();
+                                    }
+                                    let my_id = my_player_id.get();
+                                    let is_host = my_id
+                                        .and_then(|id| st.find_player(id))
+                                        .map(|p| p.seat_index == 0)
+                                        .unwrap_or(false);
+                                    let player_count = st.players.len();
+                                    let r_id = room_id.get();
+
+                                    view! {
+                                        <div class="waiting-room-backdrop">
+                                            <div class="waiting-room-card">
+                                                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                                                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                                                        <span class="mono" style=format!("font-size: 12px; color: {};", STATUS_WARNING)>
+                                                            {format!("Phòng chờ · {}", r_id)}
+                                                        </span>
+                                                        <h2 style=format!("font-size: 20px; font-weight: 600; color: {};", TEXT_PRIMARY)>
+                                                            {format!("Đang chờ người chơi ({}/4)", player_count)}
+                                                        </h2>
+                                                    </div>
+                                                    <span class="mono" style=format!(
+                                                        "padding: 4px 10px; border-radius: 6px; background: {}; border: 1px solid {}; font-size: 12px; color: {};",
+                                                        BG_SECONDARY, BORDER_DEFAULT, TEXT_SECONDARY
+                                                    )>
+                                                        {if st.config.enable_auction { "Đấu giá: Bật" } else { "Đấu giá: Tắt" }}
+                                                    </span>
+                                                </div>
+
+                                                <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                    {(0..4usize).map(|seat_idx| {
+                                                        if let Some(p) = st.players.get(seat_idx) {
+                                                            let is_me = my_id == Some(p.id);
+                                                            let badge = if seat_idx == 0 {
+                                                                "Chủ phòng"
+                                                            } else if p.is_bot_controlled {
+                                                                "Máy AI"
+                                                            } else if is_me {
+                                                                "Bạn"
+                                                            } else {
+                                                                "Sẵn sàng"
+                                                            };
+                                                            view! {
+                                                                <div style=format!(
+                                                                    "height: 44px; padding: 0 12px; border-radius: 10px; background: {}; border: 1px solid {}; display: flex; align-items: center; justify-content: space-between;",
+                                                                    BG_SECONDARY, BORDER_DEFAULT
+                                                                )>
+                                                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                                                        <PlayerAvatar seat_idx=seat_idx size=26 />
+                                                                        <span style=format!("font-size: 14px; font-weight: 500; color: {};", TEXT_PRIMARY)>
+                                                                            {p.name.clone()}
+                                                                        </span>
+                                                                    </div>
+                                                                    <span class="mono" style=format!(
+                                                                        "font-size: 12px; color: {};",
+                                                                        if seat_idx == 0 { STATUS_WARNING } else if is_me { STATUS_SUCCESS } else { TEXT_MUTED }
+                                                                    )>
+                                                                        {badge}
+                                                                    </span>
+                                                                </div>
+                                                            }.into_view()
+                                                        } else {
+                                                            view! {
+                                                                <div style=format!(
+                                                                    "height: 44px; padding: 0 12px; border-radius: 10px; background: transparent; border: 1px dashed {}; display: flex; align-items: center; justify-content: space-between;",
+                                                                    BORDER_DEFAULT
+                                                                )>
+                                                                    <span style=format!("font-size: 13px; color: {};", TEXT_MUTED)>
+                                                                        {format!("Vị trí T{} · Đang chờ người chơi...", seat_idx + 1)}
+                                                                    </span>
+                                                                </div>
+                                                            }.into_view()
+                                                        }
+                                                    }).collect_view()}
+                                                </div>
+
+                                                {if is_host {
+                                                    view! {
+                                                        <div style="display: flex; gap: 10px;">
+                                                            <button
+                                                                class="btn btn-secondary"
+                                                                style="flex: 1;"
+                                                                disabled=move || player_count >= 4
+                                                                on:click=move |_| handle_action.call(ClientMessage::AddBot)
+                                                            >
+                                                                "Thêm máy AI"
+                                                            </button>
+                                                            <button
+                                                                class="btn"
+                                                                style="flex: 1;"
+                                                                disabled=move || player_count < 2
+                                                                on:click=move |_| handle_action.call(ClientMessage::StartGame)
+                                                            >
+                                                                "Bắt đầu ván đấu"
+                                                            </button>
+                                                        </div>
+                                                    }.into_view()
+                                                } else {
+                                                    view! {
+                                                        <div style=format!("text-align: center; font-size: 13px; color: {}; padding: 4px 0;", TEXT_SECONDARY)>
+                                                            "Đang chờ chủ phòng bắt đầu ván đấu (tự động bắt đầu khi đủ 4 người)..."
+                                                        </div>
+                                                    }.into_view()
+                                                }}
+                                            </div>
+                                        </div>
+                                    }.into_view()
+                                }}
 
                                 <div class="floating-dice-hud">
                                     {move || {
@@ -1331,7 +1842,38 @@ pub fn App() -> impl IntoView {
 
                                         let mut context_buttons: Vec<View> = Vec::new();
 
-                                        if !busy && is_my_turn {
+                                        if !busy && st.turn_phase == TurnPhase::Auction {
+                                            if let (Some(me), Some(auc)) = (me_opt, st.auction.as_ref()) {
+                                                let next_bid = auc.current_bid + Money::from_vnd(50_000);
+                                                let is_active = auc.active_bidders.contains(&me.id);
+                                                let can_bid = is_active && me.cash >= next_bid;
+                                                if is_active {
+                                                    if local_mode {
+                                                        let bidder_name = me.name.clone();
+                                                        context_buttons.push(view! {
+                                                            <span class="mono" style=format!("font-size: 12px; font-weight: 600; color: {}; padding: 0 4px;", STATUS_WARNING)>
+                                                                {format!("Đấu giá · {}", bidder_name)}
+                                                            </span>
+                                                        }.into_view());
+                                                    }
+                                                    context_buttons.push(view! {
+                                                        <button
+                                                            class="btn-hud-pill btn-hud-buy"
+                                                            disabled=move || !can_bid
+                                                            on:click=move |_| handle_action.call(ClientMessage::PlaceBid { amount: next_bid })
+                                                        >
+                                                            {format!("Trả {}", next_bid)}
+                                                        </button>
+                                                        <button
+                                                            class="btn-hud-pill btn-hud-secondary"
+                                                            on:click=move |_| handle_action.call(ClientMessage::PassAuction)
+                                                        >
+                                                            "Bỏ đấu giá"
+                                                        </button>
+                                                    }.into_view());
+                                                }
+                                            }
+                                        } else if !busy && is_my_turn {
                                             match st.turn_phase {
                                                 TurnPhase::TileActionPending => {
                                                     if let Some(me) = me_opt {
@@ -1366,6 +1908,16 @@ pub fn App() -> impl IntoView {
                                                     if let Some(me) = me_opt {
                                                         if me.in_jail {
                                                             let can_bail = me.cash >= Money::from_vnd(500_000);
+                                                            if me.get_out_of_jail_cards > 0 {
+                                                                context_buttons.push(view! {
+                                                                    <button
+                                                                        class="btn-hud-pill btn-hud-buy"
+                                                                        on:click=move |_| handle_action.call(ClientMessage::UseJailCard)
+                                                                    >
+                                                                        "Dùng thẻ ra tù"
+                                                                    </button>
+                                                                }.into_view());
+                                                            }
                                                             context_buttons.push(view! {
                                                                 <button
                                                                     class="btn-hud-pill btn-hud-secondary"
@@ -1378,30 +1930,7 @@ pub fn App() -> impl IntoView {
                                                         }
                                                     }
                                                 }
-                                                TurnPhase::Auction => {
-                                                    if let (Some(me), Some(auc)) = (me_opt, st.auction.as_ref()) {
-                                                        let next_bid = auc.current_bid + Money::from_vnd(50_000);
-                                                        let is_active = auc.active_bidders.contains(&me.id);
-                                                        let can_bid = is_active && me.cash >= next_bid;
-                                                        if is_active {
-                                                            context_buttons.push(view! {
-                                                                <button
-                                                                    class="btn-hud-pill btn-hud-buy"
-                                                                    disabled=move || !can_bid
-                                                                    on:click=move |_| handle_action.call(ClientMessage::PlaceBid { amount: next_bid })
-                                                                >
-                                                                    {format!("Trả {}", next_bid)}
-                                                                </button>
-                                                                <button
-                                                                    class="btn-hud-pill btn-hud-secondary"
-                                                                    on:click=move |_| handle_action.call(ClientMessage::PassAuction)
-                                                                >
-                                                                    "Bỏ đấu giá"
-                                                                </button>
-                                                            }.into_view());
-                                                        }
-                                                    }
-                                                }
+                                                TurnPhase::Auction => {}
                                                 TurnPhase::TurnEnded => {
                                                     if !local_mode {
                                                         context_buttons.push(view! {
@@ -1415,6 +1944,33 @@ pub fn App() -> impl IntoView {
                                                     }
                                                 }
                                             }
+                                        }
+
+                                        if !local_mode && st.is_game_started && !st.is_game_over {
+                                            let t_sec = timer_seconds.get();
+                                            let mins = t_sec / 60;
+                                            let secs = t_sec % 60;
+                                            let is_urgent = t_sec <= 30;
+                                            let t_col = if is_urgent { STATUS_DANGER } else { TEXT_SECONDARY };
+                                            let label = if is_urgent && is_my_turn {
+                                                format!("Còn {}s!", t_sec)
+                                            } else {
+                                                format!("{}:{:02}", mins, secs)
+                                            };
+                                            context_buttons.push(view! {
+                                                <span
+                                                    class="mono"
+                                                    style=format!(
+                                                        "font-size: 12px; font-weight: 600; color: {}; padding: {}; border-radius: 999px; background: {}; border: 1px solid {};",
+                                                        t_col,
+                                                        if is_urgent && is_my_turn { "4px 10px" } else { "0 4px" },
+                                                        if is_urgent && is_my_turn { "rgba(229, 72, 77, 0.16)" } else { "transparent" },
+                                                        if is_urgent && is_my_turn { STATUS_DANGER } else { "transparent" }
+                                                    )
+                                                >
+                                                    {label}
+                                                </span>
+                                            }.into_view());
                                         }
 
                                         let roll_disabled = busy

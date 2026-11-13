@@ -24,6 +24,7 @@ pub enum RoomCommand {
     DisconnectClient(PlayerId),
     ClientAction(PlayerId, ClientMessage),
     TimerEvent(TimerNotification),
+    BotTurn(PlayerId),
     EmptyRoomTimeout,
 }
 
@@ -47,6 +48,12 @@ impl RoomActor {
         registry: Arc<DashMap<String, mpsc::Sender<RoomCommand>>>,
     ) -> mpsc::Sender<RoomCommand> {
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
+        let initial_tx = cmd_tx.clone();
+        let empty_timer = tokio::spawn(async move {
+            sleep(Duration::from_secs(60)).await;
+            let _ = initial_tx.send(RoomCommand::EmptyRoomTimeout).await;
+        });
+
         let actor = Self {
             room_id: room_id.clone(),
             state: GameState::new(),
@@ -55,7 +62,7 @@ impl RoomActor {
             rng: ChaCha8Rng::from_entropy(),
             turn_timer_handle: None,
             grace_timer_handle: None,
-            empty_room_timer_handle: None,
+            empty_room_timer_handle: Some(empty_timer),
             cmd_rx,
             self_tx: cmd_tx.clone(),
             registry: registry.clone(),
@@ -89,12 +96,21 @@ impl RoomActor {
                 RoomCommand::TimerEvent(notif) => {
                     self.handle_timer(notif).await;
                 }
+                RoomCommand::BotTurn(bot_id) => {
+                    self.execute_bot_sequence(bot_id).await;
+                }
                 RoomCommand::EmptyRoomTimeout => {
                     if self.clients.is_empty() {
                         info!(
-                            "Room {} empty for 5 minutes, shutting down actor",
+                            "Room {} is empty, shutting down and destroying actor",
                             self.room_id
                         );
+                        if let Some(h) = self.turn_timer_handle.take() {
+                            h.abort();
+                        }
+                        if let Some(h) = self.grace_timer_handle.take() {
+                            h.abort();
+                        }
                         self.registry.remove(&self.room_id.0);
                         return;
                     }
@@ -156,6 +172,10 @@ impl RoomActor {
         }
 
         // 2. New Player Join
+        if self.state.is_game_started {
+            let _ = reply.send(Err("Game already started".to_string()));
+            return;
+        }
         if self.state.players.len() >= 4 {
             let _ = reply.send(Err("Room is full".to_string()));
             return;
@@ -167,6 +187,7 @@ impl RoomActor {
 
         let player = PlayerState::new(p_id, player_name, seat, Some(tok.clone()));
         self.state.players.push(player);
+        self.state.turn_order.push(p_id);
         self.sessions.insert(tok.clone(), p_id);
         self.clients.insert(p_id, tx.clone());
 
@@ -181,20 +202,13 @@ impl RoomActor {
             })
             .await;
 
-        if !self.state.is_game_started {
+        self.broadcast(ServerMessage::SyncSnapshot {
+            state: serde_json::to_value(&self.state).unwrap_or_default(),
+        })
+        .await;
+
+        if self.state.players.len() == 4 {
             self.start_game().await;
-        } else {
-            self.state.turn_order.push(p_id);
-            self.broadcast(ServerMessage::SyncSnapshot {
-                state: serde_json::to_value(&self.state).unwrap_or_default(),
-            })
-            .await;
-            if self.state.players.len() == 4 {
-                self.broadcast(ServerMessage::GameStarted {
-                    turn_order: self.state.turn_order.clone(),
-                })
-                .await;
-            }
         }
     }
 
@@ -223,7 +237,7 @@ impl RoomActor {
 
         self.broadcast(ServerMessage::TurnStarted {
             active_player: player_id,
-            time_limit_seconds: 30,
+            time_limit_seconds: 120,
         })
         .await;
 
@@ -232,11 +246,20 @@ impl RoomActor {
         })
         .await;
 
-        let is_connected = self
+        let (is_connected, is_bot) = self
             .state
             .find_player(player_id)
-            .map(|p| p.is_connected)
-            .unwrap_or(false);
+            .map(|p| (p.is_connected, p.is_bot_controlled))
+            .unwrap_or((false, false));
+
+        if is_bot {
+            let tx = self.self_tx.clone();
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(600)).await;
+                let _ = tx.send(RoomCommand::BotTurn(player_id)).await;
+            });
+            return;
+        }
 
         if !is_connected {
             // Player disconnected: trigger bot after short delay
@@ -252,9 +275,9 @@ impl RoomActor {
             return;
         }
 
-        // Spawn 30-second turn countdown
+        // Spawn 2-minute (120-second) turn countdown
         let (notify_tx, mut notify_rx) = mpsc::channel(32);
-        let handle = TurnTimer::spawn_turn_countdown(player_id, 30, notify_tx);
+        let handle = TurnTimer::spawn_turn_countdown(player_id, 120, notify_tx);
         self.turn_timer_handle = Some(handle);
 
         let self_tx = self.self_tx.clone();
@@ -294,17 +317,115 @@ impl RoomActor {
             }
         }
 
-        // If all clients disconnected, spawn 5-minute teardown
+        // If all clients disconnected, auto-destroy room shortly (5s if unstarted, 15s grace if started)
         if self.clients.is_empty() {
             let self_tx = self.self_tx.clone();
+            let delay_secs = if self.state.is_game_started { 15 } else { 5 };
             self.empty_room_timer_handle = Some(tokio::spawn(async move {
-                sleep(Duration::from_secs(300)).await;
+                sleep(Duration::from_secs(delay_secs)).await;
                 let _ = self_tx.send(RoomCommand::EmptyRoomTimeout).await;
             }));
         }
     }
 
     async fn handle_action(&mut self, player_id: PlayerId, action: ClientMessage) {
+        if !self.state.is_game_started {
+            let is_host = self
+                .state
+                .find_player(player_id)
+                .map(|p| p.seat_index == 0)
+                .unwrap_or(false);
+
+            match action {
+                ClientMessage::ConfigureGame { enable_auction } => {
+                    if is_host {
+                        self.state.config.enable_auction = enable_auction;
+                        self.broadcast(ServerMessage::SyncSnapshot {
+                            state: serde_json::to_value(&self.state).unwrap_or_default(),
+                        })
+                        .await;
+                    }
+                }
+                ClientMessage::AddBot => {
+                    if !is_host {
+                        if let Some(tx) = self.clients.get(&player_id) {
+                            let _ = tx
+                                .send(ServerMessage::ActionRejected {
+                                    reason: "Chỉ chủ phòng mới có thể thêm máy AI".to_string(),
+                                })
+                                .await;
+                        }
+                        return;
+                    }
+                    if self.state.players.len() >= 4 {
+                        if let Some(tx) = self.clients.get(&player_id) {
+                            let _ = tx
+                                .send(ServerMessage::ActionRejected {
+                                    reason: "Phòng đã đủ 4 người chơi".to_string(),
+                                })
+                                .await;
+                        }
+                        return;
+                    }
+                    let bot_names = [
+                        "Máy Phú Nhuận",
+                        "Máy Chợ Lớn",
+                        "Máy Thảo Điền",
+                        "Máy Tân Định",
+                    ];
+                    let seat = self.state.players.len() as u8;
+                    let bot_name = bot_names
+                        .get(seat as usize)
+                        .copied()
+                        .unwrap_or("Máy AI")
+                        .to_string();
+                    let bot_id = PlayerId(Uuid::new_v4());
+                    let mut bot = PlayerState::new(bot_id, bot_name, seat, None);
+                    bot.is_bot_controlled = true;
+                    bot.is_connected = true;
+                    self.state.players.push(bot);
+                    self.state.turn_order.push(bot_id);
+                    self.broadcast(ServerMessage::SyncSnapshot {
+                        state: serde_json::to_value(&self.state).unwrap_or_default(),
+                    })
+                    .await;
+                }
+                ClientMessage::StartGame => {
+                    if !is_host {
+                        if let Some(tx) = self.clients.get(&player_id) {
+                            let _ = tx
+                                .send(ServerMessage::ActionRejected {
+                                    reason: "Chỉ chủ phòng mới có thể bắt đầu ván đấu".to_string(),
+                                })
+                                .await;
+                        }
+                        return;
+                    }
+                    if self.state.players.len() < 2 {
+                        if let Some(tx) = self.clients.get(&player_id) {
+                            let _ = tx
+                                .send(ServerMessage::ActionRejected {
+                                    reason: "Cần ít nhất 2 người chơi để bắt đầu".to_string(),
+                                })
+                                .await;
+                        }
+                        return;
+                    }
+                    self.start_game().await;
+                }
+                _ => {
+                    if let Some(tx) = self.clients.get(&player_id) {
+                        let _ = tx
+                            .send(ServerMessage::ActionRejected {
+                                reason: "Ván đấu chưa bắt đầu".to_string(),
+                            })
+                            .await;
+                    }
+                }
+            }
+            return;
+        }
+
         match apply_action(&self.state, player_id, &action, &mut self.rng) {
             Ok((new_state, events)) => {
                 let old_player_index = self.state.current_player_index;
@@ -329,6 +450,21 @@ impl RoomActor {
                     if let Some(active) = self.state.current_player() {
                         let active_id = active.id;
                         self.start_player_turn(active_id).await;
+                    }
+                } else if self.state.turn_phase == TurnPhase::Auction {
+                    if let Some(auc) = &self.state.auction {
+                        if let Some(&bot_bidder) = auc.active_bidders.iter().find(|bidder_id| {
+                            self.state
+                                .find_player(**bidder_id)
+                                .map(|p| p.is_bot_controlled)
+                                .unwrap_or(false)
+                        }) {
+                            let tx = self.self_tx.clone();
+                            tokio::spawn(async move {
+                                sleep(Duration::from_millis(500)).await;
+                                let _ = tx.send(RoomCommand::BotTurn(bot_bidder)).await;
+                            });
+                        }
                     }
                 }
             }

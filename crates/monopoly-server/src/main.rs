@@ -24,7 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr_v6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0));
     if let Ok(listener_v6) = TcpListener::bind(addr_v6).await {
-        info!("Monopoly Mayhem server also listening on http://{}", addr_v6);
+        info!(
+            "Monopoly Mayhem server also listening on http://{}",
+            addr_v6
+        );
         let app_v6 = app.clone();
         tokio::select! {
             res = axum::serve(listener_v4, app.into_make_service()) => res?,

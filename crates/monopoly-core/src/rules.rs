@@ -77,7 +77,7 @@ pub fn apply_action(
 
     // Verify current player for turn-based actions
     match action {
-        ClientMessage::JoinRoom { .. } => {
+        ClientMessage::JoinRoom { .. } | ClientMessage::StartGame | ClientMessage::AddBot => {
             return Err(GameRuleError::InvalidAction(
                 "Game already in progress".to_string(),
             ));
@@ -664,7 +664,7 @@ pub fn apply_action(
                 new_state.turn_phase = TurnPhase::WaitingForRoll;
                 events.push(ServerMessage::TurnStarted {
                     active_player: player_id,
-                    time_limit_seconds: 30,
+                    time_limit_seconds: 120,
                 });
             } else {
                 new_state.doubles_count = 0;
@@ -678,7 +678,9 @@ pub fn apply_action(
                 new_state.turn_phase = TurnPhase::TurnEnded;
             }
         }
-        ClientMessage::JoinRoom { .. } => unreachable!(),
+        ClientMessage::JoinRoom { .. } | ClientMessage::StartGame | ClientMessage::AddBot => {
+            unreachable!()
+        }
     }
 
     Ok((new_state, events))

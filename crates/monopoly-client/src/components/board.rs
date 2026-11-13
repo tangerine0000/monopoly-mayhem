@@ -1,23 +1,24 @@
 use crate::palette::{
-    get_district_color, get_district_label, BG_SECONDARY, BOARD_CENTER_BG, BOARD_CENTER_BORDER,
-    BOARD_OUTER_BG, BORDER_DEFAULT, BORDER_SUBTLE, PLAYER_AVATARS, PLAYER_COLORS, STATUS_DANGER,
-    STATUS_SUCCESS, STATUS_WARNING, SURFACE_HOVER, SURFACE_PANEL, TEXT_MUTED, TEXT_ON_ACCENT,
-    TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHANCE_BG, TILE_CHANCE_BORDER,
-    TILE_CHANCE_INNER_BG, TILE_CHEST, TILE_CHEST_BG, TILE_CHEST_BORDER, TILE_CHEST_INNER_BG,
-    TILE_CORNER_ACCENT, TILE_CORNER_BG, TILE_SELECTED_STROKE, TILE_STATION, TILE_STROKE, TILE_TAX,
-    TILE_TEXT_MUTED, TILE_TEXT_PRIMARY, TILE_UTILITY,
+    get_district_color, get_district_label, BOARD_CENTER_BG, BOARD_CENTER_BORDER, BOARD_OUTER_BG,
+    PLAYER_COLORS, STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_PANEL, TEXT_MUTED,
+    TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHANCE_BG,
+    TILE_CHANCE_BORDER, TILE_CHANCE_INNER_BG, TILE_CHEST, TILE_CHEST_BG, TILE_CHEST_BORDER,
+    TILE_CHEST_INNER_BG, TILE_CORNER_ACCENT, TILE_CORNER_BG, TILE_SELECTED_STROKE, TILE_STATION,
+    TILE_STROKE, TILE_TAX, TILE_TEXT_MUTED, TILE_TEXT_PRIMARY, TILE_UTILITY,
 };
 use leptos::*;
-use monopoly_core::board::{get_board, TileKind};
+use monopoly_core::board::{get_board, get_district_tiles, TileKind};
+use monopoly_core::cards::{get_chance_deck, get_community_chest_deck, CardEffect};
 use monopoly_core::money::Money;
-use monopoly_core::state::GameState;
+use monopoly_core::state::{GameState, TurnPhase};
+use monopoly_proto::{ClientMessage, PlayerId};
 
 pub const BOARD_WIDTH: f64 = 1280.0;
 pub const BOARD_HEIGHT: f64 = 960.0;
 pub const CORNER_W: f64 = 145.0;
 pub const CORNER_H: f64 = 120.0;
 pub const HORIZ_TILE_W: f64 = 110.0; // (1280 - 2 * 145) / 9 = 110
-pub const VERT_TILE_H: f64 = 80.0;   // (960 - 2 * 120) / 9 = 80
+pub const VERT_TILE_H: f64 = 80.0; // (960 - 2 * 120) / 9 = 80
 pub const HEADER_THICKNESS: f64 = 20.0;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,7 +32,12 @@ pub struct BoardFloatingPopup {
 /// Returns `(rx, ry, w, h)` for any tile `0..40` on the `1280x960` board with zero overlap.
 pub fn get_tile_rect(index: u8) -> (f64, f64, f64, f64) {
     match index {
-        0 => (BOARD_WIDTH - CORNER_W, BOARD_HEIGHT - CORNER_H, CORNER_W, CORNER_H),
+        0 => (
+            BOARD_WIDTH - CORNER_W,
+            BOARD_HEIGHT - CORNER_H,
+            CORNER_W,
+            CORNER_H,
+        ),
         1..=9 => {
             let i = index as f64;
             let rx = (BOARD_WIDTH - CORNER_W) - i * HORIZ_TILE_W;
@@ -203,7 +209,14 @@ fn render_3d_die_cube(value: u8, rolling: bool, is_left: bool, is_doubles: bool)
 }
 
 /// Renders crisp vector Monopoly illustrations for corners and special tiles without overlapping text.
-fn render_tile_illustration(idx: u8, kind: &TileKind, rx: f64, ry: f64, w: f64, h: f64) -> impl IntoView {
+fn render_tile_illustration(
+    idx: u8,
+    kind: &TileKind,
+    rx: f64,
+    ry: f64,
+    w: f64,
+    h: f64,
+) -> impl IntoView {
     match kind {
         TileKind::Go => {
             let cx = rx + w / 2.0;
@@ -285,7 +298,8 @@ fn render_tile_illustration(idx: u8, kind: &TileKind, rx: f64, ry: f64, w: f64, 
                     <rect x=cx - 2.0 y=cy - 8.0 width="4" height="9" rx="1.5" fill="#f5f0e4" />
                     <circle cx=cx cy=cy + 5.5 r="2.2" fill="#f5f0e4" />
                 </g>
-            }.into_view()
+            }
+            .into_view()
         }
         TileKind::Chance => {
             let (ix, iy) = if idx < 10 {
@@ -311,7 +325,8 @@ fn render_tile_illustration(idx: u8, kind: &TileKind, rx: f64, ry: f64, w: f64, 
                 >
                     "?"
                 </text>
-            }.into_view()
+            }
+            .into_view()
         }
         TileKind::CommunityChest => {
             let (ix, iy) = if idx < 10 {
@@ -484,6 +499,7 @@ pub fn Board(
     state: ReadSignal<GameState>,
     selected_tile: ReadSignal<Option<u8>>,
     is_rolling: ReadSignal<bool>,
+    is_animating_move: ReadSignal<bool>,
     display_dice: ReadSignal<(u8, u8)>,
     visual_positions: ReadSignal<[u8; 4]>,
     hopping_seat: ReadSignal<Option<usize>>,
@@ -493,8 +509,12 @@ pub fn Board(
     recent_house_tile: ReadSignal<Option<u8>>,
     floating_popups: ReadSignal<Vec<BoardFloatingPopup>>,
     drawn_card_banner: ReadSignal<Option<(String, String, String)>>,
+    my_player_id: ReadSignal<Option<PlayerId>>,
+    timer_seconds: ReadSignal<u32>,
+    is_local_mode: ReadSignal<bool>,
     #[prop(default = None)] on_tile_click: Option<Callback<u8>>,
     #[prop(default = None)] on_roll_dice: Option<Callback<()>>,
+    #[prop(default = None)] on_action: Option<Callback<ClientMessage>>,
 ) -> impl IntoView {
     let board = get_board();
     let (camera_mode, set_camera_mode) = create_signal(0u8);
@@ -512,19 +532,12 @@ pub fn Board(
                     class=move || if camera_mode.get() == 1 { "cam-btn active" } else { "cam-btn" }
                     on:click=move |_| set_camera_mode.set(1)
                 >
-                    "3D Nghiêng"
-                </button>
-                <button
-                    class=move || if camera_mode.get() == 2 { "cam-btn active" } else { "cam-btn" }
-                    on:click=move |_| set_camera_mode.set(2)
-                >
                     "2D Phẳng"
                 </button>
             </div>
 
             <div class=move || match camera_mode.get() {
                 0 => "board-aspect-frame view-3d-tabletop",
-                1 => "board-aspect-frame view-3d-iso",
                 _ => "board-aspect-frame view-2d-flat",
             }>
                 // True 3D CSS Cube Dice Overlay aligned to center-board tray
@@ -546,6 +559,330 @@ pub fn Board(
                             {render_3d_die_cube(d2, rolling, false, is_doubles)}
                         </div>
                     }
+                }}
+
+                // Center Board Stage (Drawn Card, Buy Decision, Auction, Waiting Status)
+                {move || {
+                    if let Some((deck_name, card_title, card_desc)) = drawn_card_banner.get() {
+                        let is_chance = deck_name.contains("Cơ Hội");
+                        let cls = if is_chance { "stage-drawn-card chance" } else { "stage-drawn-card chest" };
+                        let deck_label = if is_chance { "Thẻ Cơ hội" } else { "Thẻ Khí vận" };
+                        return view! {
+                            <div class="board-center-stage">
+                                <div class=cls>
+                                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <span class="mono" style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85;">
+                                            {deck_label}
+                                        </span>
+                                    </div>
+                                    <div style="font-size: 16px; line-height: 21px; font-weight: 700;">
+                                        {card_title}
+                                    </div>
+                                    <div style="font-size: 13px; line-height: 18px; font-weight: 500; opacity: 0.92;">
+                                        {card_desc}
+                                    </div>
+                                </div>
+                            </div>
+                        }.into_view();
+                    }
+
+                    let st = state.get();
+                    if !st.is_game_started || st.is_game_over {
+                        return view! {}.into_view();
+                    }
+
+                    let busy = is_rolling.get() || is_animating_move.get();
+                    if busy {
+                        return view! {}.into_view();
+                    }
+
+                    let my_id = my_player_id.get();
+                    let is_my_turn = my_id.is_some() && st.current_player().map(|p| p.id) == my_id;
+                    let me_opt = my_id.and_then(|id| st.find_player(id));
+
+                    // Auction Center Stage
+                    if st.turn_phase == TurnPhase::Auction {
+                        if let Some(auc) = st.auction.as_ref() {
+                            let tiles = get_board();
+                            if let Some(tile) = tiles.get(auc.tile_index as usize) {
+                                let badge_col = match &tile.kind {
+                                    TileKind::Property(p) => get_district_color(p.district),
+                                    TileKind::Station(_) => TILE_STATION,
+                                    TileKind::Utility(_) => TILE_UTILITY,
+                                    _ => STATUS_WARNING,
+                                };
+                                let leader_text = auc.highest_bidder
+                                    .and_then(|hid| st.find_player(hid))
+                                    .map(|p| format!("{} đang dẫn", p.name))
+                                    .unwrap_or_else(|| "Chưa có người trả giá".to_string());
+                                let is_active_bidder = me_opt
+                                    .map(|me| auc.active_bidders.contains(&me.id))
+                                    .unwrap_or(false);
+                                let my_cash = me_opt.map(|me| me.cash).unwrap_or(Money::ZERO);
+                                let bid_50 = auc.current_bid + Money::from_vnd(50_000);
+                                let bid_100 = auc.current_bid + Money::from_vnd(100_000);
+                                let bid_500 = auc.current_bid + Money::from_vnd(500_000);
+
+                                let bidders_view = st.players.iter().enumerate().map(|(seat_idx, pl)| {
+                                    let is_leading = auc.highest_bidder == Some(pl.id);
+                                    let is_in = auc.active_bidders.contains(&pl.id);
+                                    let chip_cls = if is_leading {
+                                        "stage-bidder-chip leading"
+                                    } else if !is_in {
+                                        "stage-bidder-chip passed"
+                                    } else {
+                                        "stage-bidder-chip"
+                                    };
+                                    view! {
+                                        <span class=chip_cls>
+                                            <PlayerAvatar seat_idx=seat_idx size=18 />
+                                            <span>{pl.name.clone()}</span>
+                                        </span>
+                                    }
+                                }).collect_view();
+
+                                return view! {
+                                    <div class="board-center-stage">
+                                        <div class="stage-card">
+                                            <div class="stage-card-header">
+                                                <span class="stage-district-pill">
+                                                    <span class="stage-district-dot" style=format!("background: {};", badge_col)></span>
+                                                    <span>{format!("Đấu giá · {}", tile.name)}</span>
+                                                </span>
+                                                <span class="mono" style=format!("font-size: 11px; color: {};", STATUS_WARNING)>
+                                                    {leader_text}
+                                                </span>
+                                            </div>
+                                            <div class="stage-price-row">
+                                                <span style=format!("font-size: 12px; color: {};", TEXT_SECONDARY)>"Giá cao nhất"</span>
+                                                <span class="mono" style=format!("font-size: 22px; font-weight: 700; color: {};", STATUS_WARNING)>
+                                                    {auc.current_bid.to_string()}
+                                                </span>
+                                            </div>
+                                            <div class="stage-auction-bidders">
+                                                {bidders_view}
+                                            </div>
+                                            {if is_active_bidder {
+                                                let on_act_50 = on_action;
+                                                let on_act_100 = on_action;
+                                                let on_act_500 = on_action;
+                                                let on_act_pass = on_action;
+                                                view! {
+                                                    <div class="stage-actions">
+                                                        <button
+                                                            class="btn-hud-pill btn-hud-buy"
+                                                            style="height: 34px; padding: 0 11px; font-size: 12px;"
+                                                            disabled=move || my_cash < bid_50
+                                                            on:click=move |_| {
+                                                                if let Some(cb) = on_act_50 {
+                                                                    cb.call(ClientMessage::PlaceBid { amount: bid_50 });
+                                                                }
+                                                            }
+                                                        >
+                                                            "+50k"
+                                                        </button>
+                                                        <button
+                                                            class="btn-hud-pill btn-hud-buy"
+                                                            style="height: 34px; padding: 0 11px; font-size: 12px;"
+                                                            disabled=move || my_cash < bid_100
+                                                            on:click=move |_| {
+                                                                if let Some(cb) = on_act_100 {
+                                                                    cb.call(ClientMessage::PlaceBid { amount: bid_100 });
+                                                                }
+                                                            }
+                                                        >
+                                                            "+100k"
+                                                        </button>
+                                                        <button
+                                                            class="btn-hud-pill btn-hud-buy"
+                                                            style="height: 34px; padding: 0 11px; font-size: 12px;"
+                                                            disabled=move || my_cash < bid_500
+                                                            on:click=move |_| {
+                                                                if let Some(cb) = on_act_500 {
+                                                                    cb.call(ClientMessage::PlaceBid { amount: bid_500 });
+                                                                }
+                                                            }
+                                                        >
+                                                            "+500k"
+                                                        </button>
+                                                        <button
+                                                            class="btn-hud-pill btn-hud-secondary"
+                                                            style="height: 34px; padding: 0 11px; font-size: 12px;"
+                                                            on:click=move |_| {
+                                                                if let Some(cb) = on_act_pass {
+                                                                    cb.call(ClientMessage::PassAuction);
+                                                                }
+                                                            }
+                                                        >
+                                                            "Bỏ"
+                                                        </button>
+                                                    </div>
+                                                }.into_view()
+                                            } else {
+                                                view! {
+                                                    <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>
+                                                        "Bạn đã rời phiên đấu giá này"
+                                                    </span>
+                                                }.into_view()
+                                            }}
+                                        </div>
+                                    </div>
+                                }.into_view();
+                            }
+                        }
+                    }
+
+                    // Buy Property Decision Card in Center Stage
+                    if is_my_turn && st.turn_phase == TurnPhase::TileActionPending {
+                        if let Some(me) = me_opt {
+                            let tiles = get_board();
+                            let tile_idx = me.position;
+                            if let Some(tile) = tiles.get(tile_idx as usize) {
+                                let (cost, badge_col, badge_label, reason_text) = match &tile.kind {
+                                    TileKind::Property(p) => {
+                                        let d_tiles = get_district_tiles(p.district);
+                                        let owned_in_district = d_tiles
+                                            .iter()
+                                            .filter(|&&t| st.properties[t as usize].owner == Some(me.id))
+                                            .count();
+                                        let total_in_district = d_tiles.len();
+                                        let missing_after = total_in_district.saturating_sub(owned_in_district + 1);
+                                        let reason = if missing_after == 0 {
+                                            format!("Đủ bộ {} · thuê ×2 và được xây nhà!", get_district_label(p.district))
+                                        } else {
+                                            format!(
+                                                "Còn thiếu {} ô để đủ bộ {} · thuê gốc {}",
+                                                missing_after,
+                                                get_district_label(p.district),
+                                                p.rent_table[0]
+                                            )
+                                        };
+                                        (p.cost, get_district_color(p.district), get_district_label(p.district).to_string(), reason)
+                                    }
+                                    TileKind::Station(s) => {
+                                        let owned_st = st.stations_owned_by(me.id);
+                                        let next_rent = Money::from_vnd(250_000 * (1i64 << owned_st));
+                                        (
+                                            s.cost,
+                                            TILE_STATION,
+                                            "Bến xe & Nhà ga".to_string(),
+                                            format!("Sở hữu {} bến · tiền vé {}", owned_st + 1, next_rent),
+                                        )
+                                    }
+                                    TileKind::Utility(u) => {
+                                        let owned_ut = st.utilities_owned_by(me.id);
+                                        let mult = if owned_ut + 1 >= 2 { 10 } else { 4 };
+                                        (
+                                            u.cost,
+                                            TILE_UTILITY,
+                                            "Công trình công cộng".to_string(),
+                                            format!("Sở hữu {} công trình · phí {}× xúc xắc", owned_ut + 1, mult),
+                                        )
+                                    }
+                                    _ => (Money::ZERO, STATUS_WARNING, "".to_string(), "".to_string()),
+                                };
+
+                                if cost > Money::ZERO {
+                                    let can_buy = me.cash >= cost;
+                                    let remaining_txt = if can_buy {
+                                        format!("Còn lại: {}", Money(me.cash.0 - cost.0))
+                                    } else {
+                                        format!("Thiếu {}", Money(cost.0 - me.cash.0))
+                                    };
+                                    let decline_label = if st.config.enable_auction { "Đấu giá" } else { "Bỏ qua" };
+                                    let on_buy = on_action;
+                                    let on_decline = on_action;
+                                    let on_inspect = on_tile_click;
+
+                                    return view! {
+                                        <div class="board-center-stage">
+                                            <div class="stage-card">
+                                                <div class="stage-card-header">
+                                                    <span class="stage-district-pill">
+                                                        <span class="stage-district-dot" style=format!("background: {};", badge_col)></span>
+                                                        <span>{badge_label}</span>
+                                                    </span>
+                                                    <span class="mono" style=format!(
+                                                        "font-size: 11px; color: {};",
+                                                        if can_buy { TEXT_SECONDARY } else { STATUS_DANGER }
+                                                    )>
+                                                        {remaining_txt}
+                                                    </span>
+                                                </div>
+                                                <div class="stage-price-row">
+                                                    <span style=format!("font-size: 18px; font-weight: 700; color: {};", TEXT_PRIMARY)>
+                                                        {tile.name.clone()}
+                                                    </span>
+                                                    <span class="mono" style=format!("font-size: 18px; font-weight: 700; color: {};", STATUS_SUCCESS)>
+                                                        {cost.to_string()}
+                                                    </span>
+                                                </div>
+                                                <div class="stage-reason">{reason_text}</div>
+                                                <button
+                                                    class="stage-link-btn"
+                                                    on:click=move |_| {
+                                                        if let Some(cb) = on_inspect {
+                                                            cb.call(tile_idx);
+                                                        }
+                                                    }
+                                                >
+                                                    "Xem bảng tiền thuê"
+                                                </button>
+                                                <div class="stage-actions">
+                                                    <button
+                                                        class="btn-hud-pill btn-hud-buy"
+                                                        style="flex: 1; height: 36px;"
+                                                        disabled=move || !can_buy
+                                                        on:click=move |_| {
+                                                            if let Some(cb) = on_buy {
+                                                                cb.call(ClientMessage::BuyProperty);
+                                                            }
+                                                        }
+                                                    >
+                                                        {format!("Mua ({})", cost)}
+                                                    </button>
+                                                    <button
+                                                        class="btn-hud-pill btn-hud-secondary"
+                                                        style="height: 36px;"
+                                                        on:click=move |_| {
+                                                            if let Some(cb) = on_decline {
+                                                                cb.call(ClientMessage::DeclineProperty);
+                                                            }
+                                                        }
+                                                    >
+                                                        {decline_label}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    }.into_view();
+                                }
+                            }
+                        }
+                    }
+
+                    // Waiting status pill when it's another player's turn
+                    if !is_my_turn {
+                        if let Some(cur_p) = st.current_player() {
+                            let seat_idx = st.players.iter().position(|p| p.id == cur_p.id).unwrap_or(0);
+                            let wait_text = if is_local_mode.get() {
+                                format!("Đang chờ {}…", cur_p.name)
+                            } else {
+                                let t_sec = timer_seconds.get();
+                                format!("Đang chờ {}… ({}:{:02})", cur_p.name, t_sec / 60, t_sec % 60)
+                            };
+                            return view! {
+                                <div class="board-center-stage">
+                                    <div class="stage-waiting-pill">
+                                        <PlayerAvatar seat_idx=seat_idx size=20 />
+                                        <span>{wait_text}</span>
+                                    </div>
+                                </div>
+                            }.into_view();
+                        }
+                    }
+
+                    view! {}.into_view()
                 }}
 
             <svg class="board-svg" viewBox="0 0 1280 960" preserveAspectRatio="xMidYMid meet">
@@ -807,312 +1144,12 @@ pub fn Board(
                                 } else {
                                     format!("Kết quả: {} + {} = {}", d1, d2, d1 + d2)
                                 }}
+
                             </text>
                         </g>
                     }
                 }}
 
-                // Drawn Card Banner (on landing at Cơ Hội / Khí Vận)
-                {move || {
-                    if let Some((deck_name, card_title, card_desc)) = drawn_card_banner.get() {
-                        let is_chance = deck_name.contains("Cơ Hội");
-                        let dot_col = if is_chance { TILE_CHANCE } else { TILE_CHEST };
-                        let deck_label = if is_chance { "Thẻ Cơ hội" } else { "Thẻ Khí vận" };
-                        view! {
-                            <g class="card-banner-group">
-                                <rect
-                                    x="0"
-                                    y="0"
-                                    width="616"
-                                    height="40"
-                                    rx="8"
-                                    fill=SURFACE_PANEL
-                                    stroke=BORDER_SUBTLE
-                                    stroke-width="1"
-                                />
-                                <circle cx="18" cy="20" r="4" fill=dot_col />
-                                <text
-                                    x="32"
-                                    y="24"
-                                    font-size="13"
-                                    font-weight="500"
-                                    fill=TEXT_PRIMARY
-                                >
-                                    {format!("{} · {}: {}", deck_label, card_title, card_desc)}
-                                </text>
-                            </g>
-                        }.into_view()
-                    } else {
-                        view! {}.into_view()
-                    }
-                }}
-
-                // Center-board Saigon Cadastral Title Deed Card (Khế Ước Địa Ốc)
-                {move || {
-                    let sel_idx = selected_tile.get()?;
-                    let all_tiles = get_board();
-                    let tile = all_tiles.get(sel_idx as usize)?.clone();
-
-                    let (badge_color, category_label) = match &tile.kind {
-                        TileKind::Property(p) => (get_district_color(p.district), get_district_label(p.district).to_string()),
-                        TileKind::Station(_) => (TILE_STATION, "Bến xe & Nhà ga".to_string()),
-                        TileKind::Utility(_) => (TILE_UTILITY, "Công trình công cộng".to_string()),
-                        TileKind::Tax(_) => (TILE_TAX, "Thuế nhà nước".to_string()),
-                        TileKind::Chance => (TILE_CHANCE, "Ô Cơ hội".to_string()),
-                        TileKind::CommunityChest => (TILE_CHEST, "Ô Khí vận".to_string()),
-                        TileKind::Go => (STATUS_SUCCESS, "Ô Khởi hành".to_string()),
-                        TileKind::Jail => (STATUS_WARNING, "Khu tạm giam".to_string()),
-                        TileKind::FreeParking => (TILE_CHEST, "Bãi đỗ xe miễn phí".to_string()),
-                        TileKind::GoToJail => (STATUS_DANGER, "Lệnh bắt giữ".to_string()),
-                    };
-
-                    let tile_for_owner = tile.clone();
-                    let tile_for_table = tile.clone();
-
-                    Some(view! {
-                        <g class="deed-card-group" transform="translate(352, 400)">
-                            <rect
-                                x="0"
-                                y="0"
-                                width="576"
-                                height="384"
-                                rx="12"
-                                fill=SURFACE_PANEL
-                                stroke=BORDER_DEFAULT
-                                stroke-width="1"
-                            />
-                            // Top District Header Band
-                            <rect
-                                x="8"
-                                y="8"
-                                width="560"
-                                height="64"
-                                rx="8"
-                                fill=badge_color
-                            />
-                            <text
-                                x="24"
-                                y="30"
-                                font-size="12"
-                                font-weight="400"
-                                font-family="'Roboto Mono', monospace"
-                                fill=TEXT_ON_ACCENT
-                                opacity="0.88"
-                            >
-                                {format!("Ô #{:02} · {}", tile.index, category_label)}
-                            </text>
-                            <text
-                                x="552"
-                                y="30"
-                                font-size="12"
-                                font-weight="400"
-                                font-family="'Roboto Mono', monospace"
-                                fill=TEXT_ON_ACCENT
-                                opacity="0.88"
-                                text-anchor="end"
-                            >
-                                "Nhấn lại ô để đóng · Khế ước"
-                            </text>
-                            <text
-                                x="24"
-                                y="56"
-                                font-size="20"
-                                font-weight="600"
-                                fill=TEXT_ON_ACCENT
-                            >
-                                {tile.name.clone()}
-                            </text>
-
-                            // Reactive Owner & Landing Price Box
-                            {move || {
-                                let st = state.get();
-                                let prop_state = st.properties.get(sel_idx as usize).copied().unwrap_or_default();
-
-                                let owner_info = if let Some(owner_id) = prop_state.owner {
-                                    if let Some((p_idx, p)) = st.players.iter().enumerate().find(|(_, p)| p.id == owner_id) {
-                                        let code = PLAYER_AVATARS[p_idx % 4];
-                                        (format!("{} · {}", code, p.name), PLAYER_COLORS[p_idx % 4])
-                                    } else {
-                                        ("Đã có chủ sở hữu".to_string(), STATUS_WARNING)
-                                    }
-                                } else {
-                                    ("Chưa có chủ · Ngân hàng quản lý".to_string(), TEXT_SECONDARY)
-                                };
-
-                                let landing_price_desc = match &tile_for_owner.kind {
-                                    TileKind::Property(p) => {
-                                        if prop_state.is_mortgaged {
-                                            "Đang thế chấp · Miễn tiền thuê".to_string()
-                                        } else if let Some(owner_id) = prop_state.owner {
-                                            let rent = if prop_state.house_count > 0 {
-                                                p.rent_table[prop_state.house_count as usize]
-                                            } else if st.owns_full_district(owner_id, p.district) {
-                                                Money(p.rent_table[0].0 * 2)
-                                            } else {
-                                                p.rent_table[0]
-                                            };
-                                            format!("Tiền thuê áp dụng: {}", rent)
-                                        } else {
-                                            format!("Giá mua: {} · Thuê cơ bản: {}", p.cost, p.rent_table[0])
-                                        }
-                                    }
-                                    TileKind::Station(s) => {
-                                        if prop_state.is_mortgaged {
-                                            "Đang thế chấp · Miễn tiền thuê".to_string()
-                                        } else if let Some(owner_id) = prop_state.owner {
-                                            let count = st.stations_owned_by(owner_id);
-                                            let mult = 1i64 << count.saturating_sub(1);
-                                            let rent = Money::from_vnd(250_000 * mult);
-                                            format!("Tiền vé ({} bến): {}", count, rent)
-                                        } else {
-                                            format!("Giá mua: {} · Thuê từ 250.000 đ đến 2.000.000 đ", s.cost)
-                                        }
-                                    }
-                                    TileKind::Utility(u) => {
-                                        if prop_state.is_mortgaged {
-                                            "Đang thế chấp · Miễn tiền thuê".to_string()
-                                        } else if let Some(owner_id) = prop_state.owner {
-                                            let count = st.utilities_owned_by(owner_id);
-                                            let mult = if count >= 2 { 10 } else { 4 };
-                                            format!("Phí dịch vụ: {} × tổng xúc xắc × 1.000 đ", mult)
-                                        } else {
-                                            format!("Giá mua: {} · Hệ số 4× hoặc 10× xúc xắc", u.cost)
-                                        }
-                                    }
-                                    TileKind::Tax(t) => format!("Khoản nộp ngân sách: {}", t.amount),
-                                    TileKind::Go => "Đi qua hoặc dừng lại nhận +2.000.000 đ".to_string(),
-                                    TileKind::Chance => "Rút 1 thẻ Cơ hội ngẫu nhiên".to_string(),
-                                    TileKind::CommunityChest => "Rút 1 thẻ Khí vận ngẫu nhiên".to_string(),
-                                    TileKind::Jail => "Thăm tù hoặc nộp 500.000 đ để ra tù".to_string(),
-                                    TileKind::FreeParking => "Dừng chân miễn phí".to_string(),
-                                    TileKind::GoToJail => "Chuyển thẳng tới Khu tạm giam (#10)".to_string(),
-                                };
-
-                                view! {
-                                    <g transform="translate(16, 84)">
-                                        <rect x="0" y="0" width="544" height="64" rx="8" fill=BG_SECONDARY stroke=BORDER_DEFAULT stroke-width="1" />
-                                        <text x="16" y="24" font-size="13" font-weight="400" fill=TEXT_MUTED>
-                                            "Chủ sở hữu"
-                                        </text>
-                                        <text x="528" y="24" font-size="13" font-weight="500" fill=owner_info.1 text-anchor="end">
-                                            {owner_info.0}
-                                        </text>
-                                        <text x="16" y="48" font-size="13" font-weight="400" fill=TEXT_MUTED>
-                                            "Mức phí khi dừng"
-                                        </text>
-                                        <text x="528" y="48" font-size="13" font-weight="500" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">
-                                            {landing_price_desc}
-                                        </text>
-                                    </g>
-                                }
-                            }}
-
-                            // Property Rent Breakdown Table (aligned columns, tabular figures)
-                            {move || {
-                                let st = state.get();
-                                let prop_state = st.properties.get(sel_idx as usize).copied().unwrap_or_default();
-
-                                match &tile_for_table.kind {
-                                    TileKind::Property(p) => {
-                                        let h_cnt = prop_state.house_count;
-                                        let render_tier_row = |y_off: f64, x_off: f64, w_box: f64, label: &str, val: Money, active: bool| {
-                                            view! {
-                                                <g transform=format!("translate({}, {})", x_off, y_off)>
-                                                    {if active {
-                                                        view! {
-                                                            <rect x="0" y="0" width=w_box height="28" rx="4" fill=SURFACE_HOVER stroke=BORDER_SUBTLE stroke-width="1" />
-                                                        }.into_view()
-                                                    } else {
-                                                        view! {}.into_view()
-                                                    }}
-                                                    <text
-                                                        x="10"
-                                                        y="18"
-                                                        font-size="12"
-                                                        font-weight=if active { "500" } else { "400" }
-                                                        fill=if active { TEXT_PRIMARY } else { TEXT_SECONDARY }
-                                                    >
-                                                        {label.to_string()}
-                                                    </text>
-                                                    <text
-                                                        x=w_box - 10.0
-                                                        y="18"
-                                                        font-size="12"
-                                                        font-weight="500"
-                                                        font-family="'Roboto Mono', monospace"
-                                                        fill=if active { STATUS_WARNING } else { TEXT_PRIMARY }
-                                                        text-anchor="end"
-                                                    >
-                                                        {val.to_string()}
-                                                    </text>
-                                                </g>
-                                            }
-                                        };
-
-                                        view! {
-                                            <g transform="translate(16, 160)">
-                                                <text x="4" y="14" font-size="12" font-weight="400" font-family="'Roboto Mono', monospace" fill=TEXT_MUTED>
-                                                    {format!("Giá đất: {}   ·   Xây nhà: {}   ·   Thế chấp: {}", p.cost, p.house_cost, p.mortgage_value)}
-                                                </text>
-
-                                                <rect x="0" y="24" width="544" height="184" rx="8" fill=BG_SECONDARY stroke=BORDER_DEFAULT stroke-width="1" />
-                                                {render_tier_row(32.0, 8.0, 260.0, "Đất trống", p.rent_table[0], h_cnt == 0)}
-                                                {render_tier_row(32.0, 276.0, 260.0, "Đủ bộ quận (×2)", Money(p.rent_table[0].0 * 2), false)}
-                                                {render_tier_row(68.0, 8.0, 260.0, "1 căn nhà", p.rent_table[1], h_cnt == 1)}
-                                                {render_tier_row(68.0, 276.0, 260.0, "2 căn nhà", p.rent_table[2], h_cnt == 2)}
-                                                {render_tier_row(104.0, 8.0, 260.0, "3 căn nhà", p.rent_table[3], h_cnt == 3)}
-                                                {render_tier_row(104.0, 276.0, 260.0, "4 căn nhà", p.rent_table[4], h_cnt == 4)}
-                                                {render_tier_row(144.0, 8.0, 528.0, "Cấp khách sạn (Tối đa)", p.rent_table[5], h_cnt == 5)}
-                                            </g>
-                                        }.into_view()
-                                    }
-                                    TileKind::Station(s) => {
-                                        view! {
-                                            <g transform="translate(16, 160)">
-                                                <text x="4" y="14" font-size="12" font-weight="400" font-family="'Roboto Mono', monospace" fill=TEXT_MUTED>
-                                                    {format!("Giá mua bến: {}   ·   Giá trị thế chấp: {}", s.cost, s.mortgage_value)}
-                                                </text>
-                                                <rect x="0" y="24" width="544" height="148" rx="8" fill=BG_SECONDARY stroke=BORDER_DEFAULT stroke-width="1" />
-                                                <text x="16" y="52" font-size="13" fill=TEXT_SECONDARY>"Sở hữu 1 bến xe hoặc nhà ga"</text>
-                                                <text x="528" y="52" font-size="13" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"250.000 đ"</text>
-                                                <text x="16" y="80" font-size="13" fill=TEXT_SECONDARY>"Sở hữu 2 bến xe hoặc nhà ga"</text>
-                                                <text x="528" y="80" font-size="13" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"500.000 đ"</text>
-                                                <text x="16" y="108" font-size="13" fill=TEXT_SECONDARY>"Sở hữu 3 bến xe hoặc nhà ga"</text>
-                                                <text x="528" y="108" font-size="13" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"1.000.000 đ"</text>
-                                                <text x="16" y="136" font-size="13" font-weight="500" fill=STATUS_WARNING>"Sở hữu trọn bộ 4 bến xe & nhà ga"</text>
-                                                <text x="528" y="136" font-size="13" font-weight="500" font-family="'Roboto Mono', monospace" fill=STATUS_WARNING text-anchor="end">"2.000.000 đ"</text>
-                                            </g>
-                                        }.into_view()
-                                    }
-                                    TileKind::Utility(u) => {
-                                        view! {
-                                            <g transform="translate(16, 160)">
-                                                <text x="4" y="14" font-size="12" font-weight="400" font-family="'Roboto Mono', monospace" fill=TEXT_MUTED>
-                                                    {format!("Giá mua công trình: {}   ·   Giá trị thế chấp: {}", u.cost, u.mortgage_value)}
-                                                </text>
-                                                <rect x="0" y="24" width="544" height="108" rx="8" fill=BG_SECONDARY stroke=BORDER_DEFAULT stroke-width="1" />
-                                                <text x="16" y="60" font-size="13" fill=TEXT_SECONDARY>"Sở hữu 1 công trình công cộng"</text>
-                                                <text x="528" y="60" font-size="13" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"4 × xúc xắc × 1.000 đ"</text>
-                                                <text x="16" y="96" font-size="13" font-weight="500" fill=STATUS_WARNING>"Sở hữu cả 2 công trình công cộng"</text>
-                                                <text x="528" y="96" font-size="13" font-weight="500" font-family="'Roboto Mono', monospace" fill=STATUS_WARNING text-anchor="end">"10 × xúc xắc × 1.000 đ"</text>
-                                            </g>
-                                        }.into_view()
-                                    }
-                                    _ => {
-                                        view! {
-                                            <g transform="translate(16, 168)">
-                                                <rect x="0" y="0" width="544" height="72" rx="8" fill=BG_SECONDARY stroke=BORDER_DEFAULT stroke-width="1" />
-                                                <text x="272" y="40" font-size="13" font-weight="400" fill=TEXT_MUTED text-anchor="middle">
-                                                    "Ô chức năng đặc biệt trên bàn cờ Sài Gòn, không áp dụng mua bán"
-                                                </text>
-                                            </g>
-                                        }.into_view()
-                                    }
-                                }
-                            }}
-                        </g>
-                    })
-                }}
 
                 // 40 Board Tiles
                 {board.into_iter().map(|tile| {
@@ -1264,6 +1301,7 @@ pub fn Board(
                                 }.into_view()
                             }}
 
+
                             {render_tile_illustration(idx, &tile_kind, rx, ry, w, h)}
 
                             {name_lines.into_iter().enumerate().map(|(line_idx, line)| {
@@ -1301,34 +1339,26 @@ pub fn Board(
                                 view! {}.into_view()
                             }}
 
-                            // Ownership Seat Monogram Stamp Badge (T1..T4, zero emoji)
+
+                            // Ownership Player Avatar Badge
                             {move || {
                                 if let Some(owner_id) = prop_owner() {
                                     let p_idx = state.get().players.iter().position(|p| p.id == owner_id).unwrap_or(0);
-                                    let col = PLAYER_COLORS[p_idx % 4];
-                                    let code = PLAYER_AVATARS[p_idx % 4];
                                     let just_acquired = recent_acquired_tile.get() == Some(idx);
                                     let badge_cls = if just_acquired { "owner-badge-pop" } else { "" };
                                     view! {
-                                        <g class=badge_cls>
-                                            <rect x=rx + 4.0 y=ry + 4.0 width="20" height="16" rx="4" fill=col stroke="#1c1a18" stroke-width="1" />
-                                            <text
-                                                x=rx + 14.0
-                                                y=ry + 15.0
-                                                font-size="9.5"
-                                                font-weight="600"
-                                                font-family="'Roboto Mono', monospace"
-                                                fill=TEXT_ON_ACCENT
-                                                text-anchor="middle"
-                                            >
-                                                {code}
-                                            </text>
+                                        <g
+                                            class=badge_cls
+                                            transform=format!("translate({}, {}) scale(0.75)", rx + 14.0, ry + 14.0)
+                                        >
+                                            {render_player_avatar_shapes(p_idx)}
                                         </g>
                                     }.into_view()
                                 } else {
                                     view! {}.into_view()
-                                 }
+                                }
                             }}
+
 
                             // 3D Isometric Miniature Houses / Hotel & Mortgage Tag
                             {move || {
@@ -1374,6 +1404,7 @@ pub fn Board(
                                                     </g>
                                                 }.into_view()
                                             }}
+
                                             <text
                                                 x=tx + 9.0
                                                 y=status_y + 1.0
@@ -1405,6 +1436,7 @@ pub fn Board(
                                     view! {}.into_view()
                                 }
                             }}
+
                         </g>
                     }
                 }).collect_view()}
@@ -1430,6 +1462,7 @@ pub fn Board(
                         view! {}.into_view()
                     }
                 }}
+
 
                 // 3D Volumetric Standing Pawn Pieces (Monogram T1..T4)
                 {move || {
@@ -1488,6 +1521,7 @@ pub fn Board(
                                     view! {}.into_view()
                                 }}
 
+
                                 <ellipse
                                     class=shadow_class
                                     cx="2"
@@ -1514,6 +1548,7 @@ pub fn Board(
                         }.into_view()
                     }).collect_view()
                 }}
+
 
                 // Floating Cash / Event Popups above Tiles
                 {move || {
@@ -1553,8 +1588,539 @@ pub fn Board(
                         }
                     }).collect_view()
                 }}
+
             </svg>
             </div>
+
+            // Always-2D Selected Tile / Asset Deed / Chance & Community Chest Detail Card
+            {move || {
+                let sel_idx = selected_tile.get()?;
+                let all_tiles = get_board();
+                let tile = all_tiles.get(sel_idx as usize)?.clone();
+                let st = state.get();
+                let prop_state = st.properties.get(sel_idx as usize).copied().unwrap_or_default();
+
+                let close_card = move || {
+                    if let Some(ref cb) = on_tile_click {
+                        cb.call(sel_idx);
+                    }
+                };
+
+                let (badge_color, category_label) = match &tile.kind {
+                    TileKind::Property(p) => (get_district_color(p.district), get_district_label(p.district).to_string()),
+                    TileKind::Station(_) => (TILE_STATION, "Bến xe & Nhà ga".to_string()),
+                    TileKind::Utility(_) => (TILE_UTILITY, "Công trình công cộng".to_string()),
+                    TileKind::Tax(_) => (TILE_TAX, "Thuế nhà nước".to_string()),
+                    TileKind::Chance => (TILE_CHANCE, "Bộ thẻ Cơ hội".to_string()),
+                    TileKind::CommunityChest => (TILE_CHEST, "Bộ thẻ Khí vận".to_string()),
+                    TileKind::Go => (STATUS_SUCCESS, "Ô Khởi hành".to_string()),
+                    TileKind::Jail => (STATUS_WARNING, "Khu tạm giam".to_string()),
+                    TileKind::FreeParking => (TILE_CHEST, "Bãi đỗ xe miễn phí".to_string()),
+                    TileKind::GoToJail => (STATUS_DANGER, "Lệnh bắt giữ".to_string()),
+                };
+
+                let format_card_effect = |eff: &CardEffect| -> (String, bool) {
+                    match eff {
+                        CardEffect::CashDelta(m) => {
+                            if m.0 >= 0 {
+                                (format!("+{}", m), true)
+                            } else {
+                                (format!("{}", m), false)
+                            }
+                        }
+                        CardEffect::MoveTo(pos) => (format!("Tới ô #{}", pos), true),
+                        CardEffect::GoToJail => ("Vào tù".to_string(), false),
+                        CardEffect::GetOutOfJailFree => ("Thẻ ra tù".to_string(), true),
+                        CardEffect::BuildingRepairs { house, hotel } => {
+                            (format!("Sửa {}/{}", house, hotel), false)
+                        }
+                        CardEffect::CollectFromAll(m) => (format!("Thu +{}", m), true),
+                        CardEffect::PayToAll(m) => (format!("Trả -{}", m), false),
+                    }
+                };
+
+                let body_view = match &tile.kind {
+                    TileKind::Chance | TileKind::CommunityChest => {
+                        let is_chance = matches!(tile.kind, TileKind::Chance);
+                        let deck = if is_chance { get_chance_deck() } else { get_community_chest_deck() };
+                        let deck_desc = if is_chance {
+                            "Khi dừng tại ô Cơ hội, người chơi rút 1 thẻ ngẫu nhiên từ bộ 16 thẻ và thực hiện hiệu ứng ngay lập tức."
+                        } else {
+                            "Khi dừng tại ô Khí vận, người chơi rút 1 thẻ ngẫu nhiên từ bộ 16 thẻ và thực hiện hiệu ứng ngay lập tức."
+                        };
+                        view! {
+                            <div class="deed-2d-body">
+                                <div class="deed-2d-primary-box" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+                                    <span style=format!("font-size: 14px; font-weight: 600; color: {};", TEXT_PRIMARY)>
+                                        {if is_chance { "Chi tiết bộ thẻ Cơ hội (16 thẻ)" } else { "Chi tiết bộ thẻ Khí vận (16 thẻ)" }}
+                                    </span>
+                                    <span style=format!("font-size: 12px; line-height: 17px; color: {};", TEXT_SECONDARY)>
+                                        {deck_desc}
+                                    </span>
+                                </div>
+
+                                <div class="deed-2d-secondary-box" style="max-height: 280px; overflow-y: auto; gap: 8px;">
+                                    {deck.into_iter().map(|card| {
+                                        let (eff_txt, is_pos) = format_card_effect(&card.effect);
+                                        let eff_col = if is_pos { STATUS_SUCCESS } else { STATUS_DANGER };
+                                        view! {
+                                            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid rgba(239, 233, 222, 0.06);">
+                                                <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+                                                    <span style=format!("font-size: 13px; font-weight: 600; color: {};", TEXT_PRIMARY)>
+                                                        {card.title}
+                                                    </span>
+                                                    <span style=format!("font-size: 11px; line-height: 15px; color: {};", TEXT_MUTED)>
+                                                        {card.description}
+                                                    </span>
+                                                </div>
+                                                <span class="mono" style=format!("font-size: 11px; font-weight: 600; color: {}; white-space: nowrap; flex-shrink: 0;", eff_col)>
+                                                    {eff_txt}
+                                                </span>
+                                            </div>
+                                        }
+                                    }).collect_view()}
+                                </div>
+                            </div>
+                        }.into_view()
+                    }
+                    TileKind::Property(p) => {
+                        let owner_view = if let Some(owner_id) = prop_state.owner {
+                            if let Some((p_idx, owner)) = st.players.iter().enumerate().find(|(_, pl)| pl.id == owner_id) {
+                                view! {
+                                    <div style="display: inline-flex; align-items: center; gap: 8px;">
+                                        <PlayerAvatar seat_idx=p_idx size=22 />
+                                        <span style=format!("font-size: 13px; font-weight: 600; color: {};", TEXT_PRIMARY)>
+                                            {owner.name.clone()}
+                                        </span>
+                                    </div>
+                                }.into_view()
+                            } else {
+                                view! { <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>"Đã có chủ"</span> }.into_view()
+                            }
+                        } else {
+                            view! { <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>"Chưa có chủ · Ngân hàng"</span> }.into_view()
+                        };
+
+                        let (primary_label, primary_value, primary_col) = if prop_state.is_mortgaged {
+                            ("Trạng thái", "Đang thế chấp · 0 đ".to_string(), STATUS_WARNING)
+                        } else if let Some(owner_id) = prop_state.owner {
+                            let rent = if prop_state.house_count > 0 {
+                                p.rent_table[prop_state.house_count as usize]
+                            } else if st.owns_full_district(owner_id, p.district) {
+                                Money(p.rent_table[0].0 * 2)
+                            } else {
+                                p.rent_table[0]
+                            };
+                            ("Tiền thuê hiện tại", rent.to_string(), STATUS_WARNING)
+                        } else {
+                            ("Giá mua đất", p.cost.to_string(), STATUS_SUCCESS)
+                        };
+
+                        let h_cnt = prop_state.house_count;
+                        let is_full_set = prop_state
+                            .owner
+                            .map(|oid| st.owns_full_district(oid, p.district))
+                            .unwrap_or(false);
+
+                        view! {
+                            <div class="deed-2d-body">
+                                // Primary Element: Key Price/Rent + Owner
+                                <div class="deed-2d-primary-box">
+                                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                                        <span style=format!("font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: {};", TEXT_MUTED)>
+                                            {primary_label}
+                                        </span>
+                                        <span class="mono" style=format!("font-size: 22px; line-height: 28px; font-weight: 700; color: {};", primary_col)>
+                                            {primary_value}
+                                        </span>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 3px;">
+                                        <span style=format!("font-size: 11px; color: {};", TEXT_MUTED)>"Chủ sở hữu"</span>
+                                        {owner_view}
+                                    </div>
+                                </div>
+
+                                // Secondary Element: Rent Tiers & Building Costs
+                                <div class="deed-2d-secondary-box">
+                                    <div class={if prop_state.owner.is_some() && h_cnt == 0 && !is_full_set { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}>
+                                        <span>"Đất trống"</span>
+                                        <span class="mono">{p.rent_table[0].to_string()}</span>
+                                    </div>
+                                    <div class={if prop_state.owner.is_some() && h_cnt == 0 && is_full_set { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}>
+                                        <span>"Đủ bộ quận (×2)"</span>
+                                        <span class="mono">{Money(p.rent_table[0].0 * 2).to_string()}</span>
+                                    </div>
+                                    <div class={if h_cnt == 1 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}>
+                                        <span>"1 căn nhà phố"</span>
+                                        <span class="mono">{p.rent_table[1].to_string()}</span>
+                                    </div>
+                                    <div class={if h_cnt == 2 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}>
+                                        <span>"2 căn nhà phố"</span>
+                                        <span class="mono">{p.rent_table[2].to_string()}</span>
+                                    </div>
+                                    <div class={if h_cnt == 3 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}>
+                                        <span>"3 căn nhà phố"</span>
+                                        <span class="mono">{p.rent_table[3].to_string()}</span>
+                                    </div>
+                                    <div class={if h_cnt == 4 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}>
+                                        <span>"4 căn nhà phố"</span>
+                                        <span class="mono">{p.rent_table[4].to_string()}</span>
+                                    </div>
+                                    <div class={if h_cnt == 5 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}>
+                                        <span>"Cấp khách sạn"</span>
+                                        <span class="mono">{p.rent_table[5].to_string()}</span>
+                                    </div>
+                                </div>
+
+                                <div style=format!("display: flex; justify-content: space-between; font-size: 11px; color: {}; padding: 0 2px;", TEXT_MUTED) class="mono">
+                                    <span>{format!("Xây nhà: {}", p.house_cost)}</span>
+                                    <span>{format!("Thế chấp: {}", p.mortgage_value)}</span>
+                                </div>
+                            </div>
+                        }.into_view()
+                    }
+                    TileKind::Station(s) => {
+                        let owner_cnt = prop_state.owner.map(|oid| st.stations_owned_by(oid)).unwrap_or(0);
+                        let (primary_label, primary_val, primary_col) = if prop_state.is_mortgaged {
+                            ("Trạng thái", "Đang thế chấp · 0 đ".to_string(), STATUS_WARNING)
+                        } else if prop_state.owner.is_some() {
+                            let mult = 1i64 << owner_cnt.saturating_sub(1);
+                            ("Tiền vé hiện tại", Money::from_vnd(250_000 * mult).to_string(), STATUS_WARNING)
+                        } else {
+                            ("Giá mua bến", s.cost.to_string(), STATUS_SUCCESS)
+                        };
+                        view! {
+                            <div class="deed-2d-body">
+                                <div class="deed-2d-primary-box">
+                                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                                        <span style=format!("font-size: 11px; text-transform: uppercase; color: {};", TEXT_MUTED)>{primary_label}</span>
+                                        <span class="mono" style=format!("font-size: 22px; font-weight: 700; color: {};", primary_col)>{primary_val}</span>
+                                    </div>
+                                    {if let Some(oid) = prop_state.owner {
+                                        if let Some((p_idx, owner)) = st.players.iter().enumerate().find(|(_, pl)| pl.id == oid) {
+                                            view! {
+                                                <div style="display: inline-flex; align-items: center; gap: 8px;">
+                                                    <PlayerAvatar seat_idx=p_idx size=22 />
+                                                    <span style=format!("font-size: 13px; font-weight: 600; color: {};", TEXT_PRIMARY)>{owner.name.clone()}</span>
+                                                </div>
+                                            }.into_view()
+                                        } else { view! {}.into_view() }
+                                    } else {
+                                        view! { <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>"Ngân hàng"</span> }.into_view()
+                                    }}
+
+                                </div>
+                                <div class="deed-2d-secondary-box">
+                                    <div class={if owner_cnt == 1 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}><span>"Sở hữu 1 bến"</span><span class="mono">"250.000 đ"</span></div>
+                                    <div class={if owner_cnt == 2 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}><span>"Sở hữu 2 bến"</span><span class="mono">"500.000 đ"</span></div>
+                                    <div class={if owner_cnt == 3 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}><span>"Sở hữu 3 bến"</span><span class="mono">"1.000.000 đ"</span></div>
+                                    <div class={if owner_cnt == 4 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}><span>"Trọn bộ 4 bến"</span><span class="mono">"2.000.000 đ"</span></div>
+                                </div>
+                                <div style=format!("font-size: 11px; color: {};", TEXT_MUTED) class="mono">
+                                    {format!("Giá trị thế chấp: {}", s.mortgage_value)}
+                                </div>
+                            </div>
+                        }.into_view()
+                    }
+                    TileKind::Utility(u) => {
+                        let owner_cnt = prop_state.owner.map(|oid| st.utilities_owned_by(oid)).unwrap_or(0);
+                        let (primary_label, primary_val, primary_col) = if prop_state.is_mortgaged {
+                            ("Trạng thái", "Đang thế chấp · 0 đ".to_string(), STATUS_WARNING)
+                        } else if prop_state.owner.is_some() {
+                            let mult = if owner_cnt >= 2 { 10 } else { 4 };
+                            ("Hệ số phí", format!("{}× xúc xắc", mult), STATUS_WARNING)
+                        } else {
+                            ("Giá mua công trình", u.cost.to_string(), STATUS_SUCCESS)
+                        };
+                        view! {
+                            <div class="deed-2d-body">
+                                <div class="deed-2d-primary-box">
+                                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                                        <span style=format!("font-size: 11px; text-transform: uppercase; color: {};", TEXT_MUTED)>{primary_label}</span>
+                                        <span class="mono" style=format!("font-size: 22px; font-weight: 700; color: {};", primary_col)>{primary_val}</span>
+                                    </div>
+                                </div>
+                                <div class="deed-2d-secondary-box">
+                                    <div class={if owner_cnt == 1 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}><span>"Sở hữu 1 công trình"</span><span class="mono">"4 × xúc xắc × 1.000 đ"</span></div>
+                                    <div class={if owner_cnt >= 2 { "deed-2d-tier-row active" } else { "deed-2d-tier-row" }}><span>"Sở hữu cả 2 công trình"</span><span class="mono">"10 × xúc xắc × 1.000 đ"</span></div>
+                                </div>
+                                <div style=format!("font-size: 11px; color: {};", TEXT_MUTED) class="mono">
+                                    {format!("Giá trị thế chấp: {}", u.mortgage_value)}
+                                </div>
+                            </div>
+                        }.into_view()
+                    }
+                    TileKind::Tax(t) => view! {
+                        <div class="deed-2d-body">
+                            <div class="deed-2d-primary-box">
+                                <div style="display: flex; flex-direction: column; gap: 2px;">
+                                    <span style=format!("font-size: 11px; color: {};", TEXT_MUTED)>"Khoản nộp ngân sách"</span>
+                                    <span class="mono" style=format!("font-size: 22px; font-weight: 700; color: {};", STATUS_DANGER)>{t.amount.to_string()}</span>
+                                </div>
+                            </div>
+                        </div>
+                    }.into_view(),
+                    _ => {
+                        let desc = match &tile.kind {
+                            TileKind::Go => "Đi qua hoặc dừng lại ô này được nhận +2.000.000 đ tiền lương.",
+                            TileKind::Jail => "Thăm tù miễn phí, hoặc nộp 500.000 đ để bảo lãnh khi đang bị giam.",
+                            TileKind::FreeParking => "Dừng chân nghỉ ngơi miễn phí, không phát sinh thu chi.",
+                            TileKind::GoToJail => "Di chuyển thẳng tới Khu tạm giam (#10) và không nhận lương qua Khởi hành.",
+                            _ => "",
+                        };
+                        view! {
+                            <div class="deed-2d-body">
+                                <div class="deed-2d-secondary-box">
+                                    <span style=format!("font-size: 13px; line-height: 20px; color: {};", TEXT_SECONDARY)>{desc}</span>
+                                </div>
+                            </div>
+                        }.into_view()
+                    }
+                };
+
+                let my_id = my_player_id.get();
+                let is_my_turn = my_id.is_some() && st.current_player().map(|p| p.id) == my_id;
+                let is_owned_by_me = my_id.is_some() && prop_state.owner == my_id;
+
+                let owner_actions_view = if st.is_game_started && !st.is_game_over && is_owned_by_me {
+                    if let Some(me) = my_id.and_then(|id| st.find_player(id)) {
+                        match &tile.kind {
+                            TileKind::Property(p) => {
+                                let d_tiles = get_district_tiles(p.district);
+                                let full_set = st.owns_full_district(me.id, p.district);
+                                let any_mortgaged = d_tiles.iter().any(|&t| st.properties[t as usize].is_mortgaged);
+                                let min_h = d_tiles.iter().map(|&t| st.properties[t as usize].house_count).min().unwrap_or(0);
+                                let max_h = d_tiles.iter().map(|&t| st.properties[t as usize].house_count).max().unwrap_or(0);
+                                let h_cnt = prop_state.house_count;
+
+                                let can_build = is_my_turn
+                                    && full_set
+                                    && !any_mortgaged
+                                    && h_cnt < 5
+                                    && h_cnt == min_h
+                                    && me.cash >= p.house_cost;
+                                let can_sell = is_my_turn && h_cnt > 0 && h_cnt == max_h;
+                                let can_mortgage = is_my_turn && !prop_state.is_mortgaged && max_h == 0;
+                                let unmortgage_cost = Money((p.mortgage_value.0 * 11) / 10);
+                                let can_unmortgage = is_my_turn && prop_state.is_mortgaged && me.cash >= unmortgage_cost;
+
+                                let hint = if !is_my_turn {
+                                    Some("Chỉ thao tác được trong lượt của bạn".to_string())
+                                } else if !full_set {
+                                    Some(format!("Cần độc quyền {} để xây nhà", get_district_label(p.district)))
+                                } else if any_mortgaged {
+                                    Some("Cần chuộc lại các ô thế chấp trong quận trước khi xây".to_string())
+                                } else if h_cnt >= 5 {
+                                    Some("Đã đạt cấp Khách sạn tối đa".to_string())
+                                } else if h_cnt > min_h {
+                                    Some("Cần xây đều các ô trong quận".to_string())
+                                } else if me.cash < p.house_cost {
+                                    Some(format!("Cần {} để xây thêm", p.house_cost))
+                                } else {
+                                    None
+                                };
+
+                                let build_label = if h_cnt == 4 {
+                                    format!("Lên Khách sạn ({})", p.house_cost)
+                                } else {
+                                    format!("Xây nhà ({})", p.house_cost)
+                                };
+                                let sell_refund = Money(p.house_cost.0 / 2);
+                                let on_b = on_action;
+                                let on_s = on_action;
+                                let on_m = on_action;
+                                let on_u = on_action;
+
+                                view! {
+                                    <div class="deed-2d-actions" style="padding: 10px 16px 14px;">
+                                        <div class="deed-2d-action-row">
+                                            <button
+                                                class="btn-hud-pill btn-hud-buy"
+                                                style="height: 34px; font-size: 12px; flex: 1;"
+                                                disabled=move || !can_build
+                                                on:click=move |_| {
+                                                    if let Some(cb) = on_b {
+                                                        cb.call(ClientMessage::BuildHouse { tile_index: sel_idx });
+                                                    }
+                                                }
+                                            >
+                                                {build_label}
+                                            </button>
+                                            {if h_cnt > 0 {
+                                                view! {
+                                                    <button
+                                                        class="btn-hud-pill btn-hud-secondary"
+                                                        style="height: 34px; font-size: 12px;"
+                                                        disabled=move || !can_sell
+                                                        on:click=move |_| {
+                                                            if let Some(cb) = on_s {
+                                                                cb.call(ClientMessage::SellHouse { tile_index: sel_idx });
+                                                            }
+                                                        }
+                                                    >
+                                                        {format!("Bán nhà (+{})", sell_refund)}
+                                                    </button>
+                                                }.into_view()
+                                            } else if prop_state.is_mortgaged {
+                                                view! {
+                                                    <button
+                                                        class="btn-hud-pill btn-hud-secondary"
+                                                        style="height: 34px; font-size: 12px;"
+                                                        disabled=move || !can_unmortgage
+                                                        on:click=move |_| {
+                                                            if let Some(cb) = on_u {
+                                                                cb.call(ClientMessage::UnmortgageProperty { tile_index: sel_idx });
+                                                            }
+                                                        }
+                                                    >
+                                                        {format!("Chuộc ({})", unmortgage_cost)}
+                                                    </button>
+                                                }.into_view()
+                                            } else {
+                                                view! {
+                                                    <button
+                                                        class="btn-hud-pill btn-hud-secondary"
+                                                        style="height: 34px; font-size: 12px;"
+                                                        disabled=move || !can_mortgage
+                                                        on:click=move |_| {
+                                                            if let Some(cb) = on_m {
+                                                                cb.call(ClientMessage::MortgageProperty { tile_index: sel_idx });
+                                                            }
+                                                        }
+                                                    >
+                                                        {format!("Thế chấp (+{})", p.mortgage_value)}
+                                                    </button>
+                                                }.into_view()
+                                            }}
+                                        </div>
+                                        {hint.map(|h| view! { <span class="deed-2d-action-hint">{h}</span> })}
+                                    </div>
+                                }.into_view()
+                            }
+                            TileKind::Station(s) => {
+                                let m_val = s.mortgage_value;
+                                let unm_cost = Money((m_val.0 * 11) / 10);
+                                let can_m = is_my_turn && !prop_state.is_mortgaged;
+                                let can_u = is_my_turn && prop_state.is_mortgaged && me.cash >= unm_cost;
+                                let on_m = on_action;
+                                let on_u = on_action;
+                                view! {
+                                    <div class="deed-2d-actions" style="padding: 10px 16px 14px;">
+                                        <div class="deed-2d-action-row">
+                                            {if prop_state.is_mortgaged {
+                                                view! {
+                                                    <button
+                                                        class="btn-hud-pill btn-hud-secondary"
+                                                        style="height: 34px; font-size: 12px; flex: 1;"
+                                                        disabled=move || !can_u
+                                                        on:click=move |_| {
+                                                            if let Some(cb) = on_u {
+                                                                cb.call(ClientMessage::UnmortgageProperty { tile_index: sel_idx });
+                                                            }
+                                                        }
+                                                    >
+                                                        {format!("Chuộc lại ({})", unm_cost)}
+                                                    </button>
+                                                }.into_view()
+                                            } else {
+                                                view! {
+                                                    <button
+                                                        class="btn-hud-pill btn-hud-secondary"
+                                                        style="height: 34px; font-size: 12px; flex: 1;"
+                                                        disabled=move || !can_m
+                                                        on:click=move |_| {
+                                                            if let Some(cb) = on_m {
+                                                                cb.call(ClientMessage::MortgageProperty { tile_index: sel_idx });
+                                                            }
+                                                        }
+                                                    >
+                                                        {format!("Thế chấp (+{})", m_val)}
+                                                    </button>
+                                                }.into_view()
+                                            }}
+                                        </div>
+                                    </div>
+                                }.into_view()
+                            }
+                            TileKind::Utility(u) => {
+                                let m_val = u.mortgage_value;
+                                let unm_cost = Money((m_val.0 * 11) / 10);
+                                let can_m = is_my_turn && !prop_state.is_mortgaged;
+                                let can_u = is_my_turn && prop_state.is_mortgaged && me.cash >= unm_cost;
+                                let on_m = on_action;
+                                let on_u = on_action;
+                                view! {
+                                    <div class="deed-2d-actions" style="padding: 10px 16px 14px;">
+                                        <div class="deed-2d-action-row">
+                                            {if prop_state.is_mortgaged {
+                                                view! {
+                                                    <button
+                                                        class="btn-hud-pill btn-hud-secondary"
+                                                        style="height: 34px; font-size: 12px; flex: 1;"
+                                                        disabled=move || !can_u
+                                                        on:click=move |_| {
+                                                            if let Some(cb) = on_u {
+                                                                cb.call(ClientMessage::UnmortgageProperty { tile_index: sel_idx });
+                                                            }
+                                                        }
+                                                    >
+                                                        {format!("Chuộc lại ({})", unm_cost)}
+                                                    </button>
+                                                }.into_view()
+                                            } else {
+                                                view! {
+                                                    <button
+                                                        class="btn-hud-pill btn-hud-secondary"
+                                                        style="height: 34px; font-size: 12px; flex: 1;"
+                                                        disabled=move || !can_m
+                                                        on:click=move |_| {
+                                                            if let Some(cb) = on_m {
+                                                                cb.call(ClientMessage::MortgageProperty { tile_index: sel_idx });
+                                                            }
+                                                        }
+                                                    >
+                                                        {format!("Thế chấp (+{})", m_val)}
+                                                    </button>
+                                                }.into_view()
+                                            }}
+                                        </div>
+                                    </div>
+                                }.into_view()
+                            }
+                            _ => view! {}.into_view(),
+                        }
+                    } else {
+                        view! {}.into_view()
+                    }
+                } else {
+                    view! {}.into_view()
+                };
+
+                Some(view! {
+                    <div class="deed-2d-backdrop" on:click=move |_| close_card()>
+                        <div class="deed-2d-card" on:click=move |ev| ev.stop_propagation()>
+                            <div style=format!("background: {}; padding: 14px 16px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;", badge_color)>
+                                <div style="display: flex; flex-direction: column; gap: 2px;">
+                                    <span class="mono" style=format!("font-size: 11px; color: {}; opacity: 0.85;", TEXT_ON_ACCENT)>
+                                        {format!("Ô #{:02} · {}", tile.index, category_label)}
+                                    </span>
+                                    <h3 style=format!("font-size: 20px; line-height: 26px; font-weight: 700; color: {};", TEXT_ON_ACCENT)>
+                                        {tile.name.clone()}
+                                    </h3>
+                                </div>
+                                <button
+                                    style=format!("background: rgba(0, 0, 0, 0.25); color: {}; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 500; cursor: pointer;", TEXT_ON_ACCENT)
+                                    on:click=move |_| close_card()
+                                >
+                                    "Đóng"
+                                </button>
+                            </div>
+                            {body_view}
+                            {owner_actions_view}
+                        </div>
+                    </div>
+                })
+            }}
         </div>
     }
 }
@@ -1576,8 +2142,14 @@ mod tests {
             assert!(rx >= 0.0, "Tile {idx} rx < 0");
             assert!(ry >= 0.0, "Tile {idx} ry < 0");
             assert!(w > 0.0 && h > 0.0, "Tile {idx} invalid size");
-            assert!(rx + w <= BOARD_WIDTH + 1e-6, "Tile {idx} exceeds BOARD_WIDTH");
-            assert!(ry + h <= BOARD_HEIGHT + 1e-6, "Tile {idx} exceeds BOARD_HEIGHT");
+            assert!(
+                rx + w <= BOARD_WIDTH + 1e-6,
+                "Tile {idx} exceeds BOARD_WIDTH"
+            );
+            assert!(
+                ry + h <= BOARD_HEIGHT + 1e-6,
+                "Tile {idx} exceeds BOARD_HEIGHT"
+            );
 
             let (cx, cy) = get_tile_center(idx);
             assert!(cx > rx && cx < rx + w, "Tile {idx} center X outside rect");
@@ -1604,8 +2176,8 @@ mod tests {
             let pips = svg_die_pips_centered(val);
             assert_eq!(pips.len(), val as usize);
             for (px, py, is_red) in pips {
-                assert!(px >= -16.0 && px <= 16.0);
-                assert!(py >= -16.0 && py <= 16.0);
+                assert!((-16.0..=16.0).contains(&px));
+                assert!((-16.0..=16.0).contains(&py));
                 assert_eq!(is_red, val == 1 || val == 4);
             }
         }
@@ -1616,7 +2188,10 @@ mod tests {
         for val in 1..=6u8 {
             let mask = die_face_pip_mask(val);
             let pip_count = mask.into_iter().filter(|&b| b).count();
-            assert_eq!(pip_count, val as usize, "Face {val} pip mask count mismatch");
+            assert_eq!(
+                pip_count, val as usize,
+                "Face {val} pip mask count mismatch"
+            );
             assert!(!die_3d_settled_transform(val).is_empty());
         }
     }
@@ -1626,7 +2201,12 @@ mod tests {
         for tile in get_board() {
             let lines = wrap_tile_name(&tile.name, 13);
             assert!(!lines.is_empty());
-            assert!(lines.len() <= 3, "Tile {} wrapped into too many lines: {:?}", tile.name, lines);
+            assert!(
+                lines.len() <= 3,
+                "Tile {} wrapped into too many lines: {:?}",
+                tile.name,
+                lines
+            );
         }
     }
 }
