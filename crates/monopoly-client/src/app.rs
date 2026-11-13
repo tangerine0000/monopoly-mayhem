@@ -2019,14 +2019,6 @@ pub fn App() -> impl IntoView {
                                                     view! {
                                                         <div style="display: flex; gap: 10px;">
                                                             <button
-                                                                class="btn btn-secondary"
-                                                                style="flex: 1;"
-                                                                disabled=move || player_count >= max_p
-                                                                on:click=move |_| handle_action.call(ClientMessage::AddBot)
-                                                            >
-                                                                "Thêm máy AI"
-                                                            </button>
-                                                            <button
                                                                 class="btn"
                                                                 style="flex: 1;"
                                                                 disabled=move || player_count < 2
