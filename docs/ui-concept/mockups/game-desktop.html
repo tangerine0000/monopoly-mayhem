@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup · Màn chơi desktop</title>
+<link rel="stylesheet" href="shared.css">
+<script src="board.js"></script>
+<style>
+  .app { display: grid; grid-template-rows: 60px 1fr; height: 100vh; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 24px; background: var(--table-deep); color: #f4ead6; }
+  .logo { display: flex; align-items: center; gap: 10px; font: 800 21px var(--f-display); }
+  .logo .mark { width: 30px; height: 30px; border-radius: 8px; background: var(--son); display: grid; place-items: center; box-shadow: 0 -3px 0 #9b2820 inset; }
+  .logo .mark svg { width: 18px; height: 18px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .pill-dark { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,.07); font: 500 var(--t-body) var(--f-ui); color: #cfc3aa; }
+  .pill-dark b { font-weight: 700; color: #fff; }
+  .iconbtn { width: 38px; height: 38px; border-radius: 10px; background: rgba(255,255,255,.07); display: grid; place-items: center; color: #e9dcc2; }
+  .iconbtn svg { width: 20px; height: 20px; }
+
+  .stage { display: grid; grid-template-columns: 260px 1fr 290px; gap: 24px; padding: 20px 24px; min-height: 0; }
+  .rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .rail h3 { font: 600 var(--t-meta) var(--f-ui); color: #9fbdb5; padding: 0 4px 2px; }
+
+  /* Người chơi: chỉ tên + tiền; trạng thái đặc biệt mới có dòng thứ 3 */
+  .player { display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 8px; padding: 12px 14px; align-items: center; }
+  .player.active { box-shadow: 0 0 0 3px var(--gold), var(--shadow-card); }
+  .player .nm { font: 600 var(--t-body) var(--f-ui); color: var(--ink-2); display: flex; gap: 6px; align-items: center; }
+  .player .you { font: 600 11px var(--f-ui); background: var(--ink); color: var(--plaster); padding: 1px 7px; border-radius: 999px; }
+  .player .cash { font: 800 22px/1.15 var(--f-display); font-variant-numeric: tabular-nums; }
+  .pips { grid-column: 1 / -1; display: flex; gap: 4px; }
+  .pips span { flex: 1; height: 5px; border-radius: 3px; background: var(--plaster-2); }
+  .state { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; font: 500 var(--t-meta) var(--f-ui); color: #8a5208; }
+  .state svg { width: 14px; height: 14px; }
+  .player.away { opacity: .75; }
+  .player.away .state { color: var(--ink-3); }
+
+  .board-col { display: grid; place-items: center; min-height: 0; }
+  .board-wrap { width: min(100%, 790px); aspect-ratio: 1; }
+  .board { width: 100%; height: 100%; }
+
+  .stagecard { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+  .turnbar { display: flex; align-items: center; gap: 10px; background: var(--ink); color: var(--plaster); padding: 5px 16px 5px 5px; border-radius: 999px; box-shadow: var(--shadow-card); font: 600 var(--t-body) var(--f-ui); }
+  .turnbar .avatar { width: 32px; height: 32px; border-width: 2px; } .turnbar .avatar svg { width: 18px; height: 18px; }
+  .turnbar .t { font: 700 var(--t-body) var(--f-ui); color: var(--gold); font-variant-numeric: tabular-nums; }
+  .dice { display: flex; gap: 12px; }
+  .die { width: 50px; height: 50px; border-radius: 12px; background: linear-gradient(145deg, #fff, #efe6d4); box-shadow: 0 -4px 0 #d8c8a8 inset, 0 8px 14px -4px rgba(0,0,0,.4); display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 9px; }
+  .die i { width: 9px; height: 9px; border-radius: 50%; background: var(--son); place-self: center; }
+  .die.b i { background: var(--ink); }
+
+  /* Thẻ quyết định: 1 tên, 1 giá, 1 lý do, 2 nút */
+  .deed { width: 360px; background: #fffaf0; border-radius: 20px; box-shadow: var(--shadow-pop); overflow: hidden; }
+  .deed .head { background: var(--q1); color: #fff; padding: 14px 20px 16px; }
+  .deed .head .d { font: 500 var(--t-meta) var(--f-ui); color: #c6d3ee; }
+  .deed .head h2 { font: 800 var(--t-key)/1.1 var(--f-display); }
+  .deed .body { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 16px; }
+  .price { display: flex; align-items: baseline; justify-content: space-between; }
+  .price b { font: 800 26px var(--f-display); font-variant-numeric: tabular-nums; }
+  .price span { font: 500 var(--t-meta) var(--f-ui); color: var(--ink-3); }
+  .why { display: flex; align-items: center; gap: 10px; font: 600 var(--t-body) var(--f-ui); color: #6a4a07; }
+  .why .star { width: 30px; height: 30px; border-radius: 50%; background: #fff0c2; display: grid; place-items: center; flex-shrink: 0; }
+  .why .star svg { width: 18px; height: 18px; }
+  .why small { display: block; font-weight: 500; font-size: var(--t-meta); color: var(--ink-3); }
+  .actions { display: grid; grid-template-columns: 1.5fr 1fr; gap: 10px; }
+  .more { font: 500 var(--t-meta) var(--f-ui); color: var(--ink-3); text-align: center; text-decoration: underline; text-underline-offset: 3px; }
+
+  /* Tài sản: mỗi quận 1 dòng */
+  .portfolio { padding: 6px 14px; }
+  .grp { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--plaster-2); }
+  .grp:first-child { border-top: 0; }
+  .grp .t { font: 600 var(--t-body) var(--f-ui); display: flex; align-items: center; gap: 8px; }
+  .grp .t i { width: 10px; height: 10px; border-radius: 50%; }
+  .dots { display: flex; gap: 4px; margin-top: 6px; }
+  .dots i { width: 18px; height: 6px; border-radius: 3px; background: var(--plaster-2); }
+  .grp .mini { height: 36px; padding: 0 14px; font-size: 14px; border-radius: 10px; }
+  .grp .hint { font: 500 var(--t-meta) var(--f-ui); color: var(--ink-3); }
+
+  /* Bản tin: 1 dòng mỗi sự kiện, số tiền tách cột */
+  .feed { padding: 4px 14px; }
+  .ev { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center; padding: 11px 0; border-top: 1px solid var(--plaster-2); font: 500 var(--t-body) var(--f-ui); color: var(--ink-2); white-space: nowrap; }
+  .ev:first-child { border-top: 0; }
+  .ev .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .ev span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; }
+  .ev b { color: var(--ink); font-weight: 600; }
+  .ev .amt { font: 700 var(--t-body) var(--f-ui); font-variant-numeric: tabular-nums; }
+  .plus { color: #1f7a45; } .minus { color: var(--son); }
+  .feed .all { display: block; padding: 10px 0 12px; font: 500 var(--t-meta) var(--f-ui); color: var(--ink-3); border-top: 1px solid var(--plaster-2); }
+</style>
+</head>
+<body class="gachbong-bg">
+<div class="app">
+  <header class="topbar">
+    <div class="logo"><span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1" fill="#fff"/><circle cx="15" cy="15" r="1" fill="#fff"/></svg></span>Cờ Tỷ Phú Sài Gòn</div>
+    <div class="row">
+      <span class="pill-dark">Phòng <b>SGN-8F2K</b></span>
+      <span class="pill-dark">Vòng <b>7</b></span>
+    </div>
+    <div class="row">
+      <span class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg></span>
+      <span class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span>
+    </div>
+  </header>
+
+  <main class="stage">
+    <aside class="rail">
+      <h3>Người chơi</h3>
+      <div class="card player active">
+        <div class="timer-ring"><div class="avatar" style="--c:var(--p1)" id="av1"></div>
+          <svg class="ring" viewBox="0 0 56 56"><circle cx="28" cy="28" r="26" fill="none" stroke="#e8dcc3" stroke-width="4"/><circle cx="28" cy="28" r="26" fill="none" stroke="var(--gold)" stroke-width="4" stroke-dasharray="163" stroke-dashoffset="49" stroke-linecap="round"/></svg></div>
+        <div><div class="nm">Minh <span class="you">Bạn</span></div><div class="cash">9.200.000 đ</div></div>
+        <div class="pips"><span></span><span style="background:var(--q8)"></span><span></span><span></span><span></span><span></span><span></span><span style="background:var(--q1);opacity:.45"></span></div>
+      </div>
+      <div class="card player">
+        <div class="avatar" style="--c:var(--p2)" id="av2"></div>
+        <div><div class="nm">Lan</div><div class="cash">6.450.000 đ</div></div>
+        <div class="pips"><span></span><span></span><span></span><span></span><span></span><span style="background:var(--q3)"></span><span></span><span></span></div>
+      </div>
+      <div class="card player">
+        <div class="avatar" style="--c:var(--p3)" id="av3"></div>
+        <div><div class="nm">Phúc</div><div class="cash">11.800.000 đ</div></div>
+        <div class="state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg>Tạm giam · lượt 2/3</div>
+      </div>
+      <div class="card player away">
+        <div class="avatar" style="--c:var(--p4)" id="av4"></div>
+        <div><div class="nm">Hải</div><div class="cash">3.100.000 đ</div></div>
+        <div class="state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M12 20h.01M8.5 16.5a5 5 0 0 1 7 0"/></svg>Mất kết nối · bot đi thay</div>
+      </div>
+    </aside>
+
+    <section class="board-col">
+      <div class="board-wrap">
+        <div class="board tilt" id="board">
+          <div class="center">
+            <script>document.currentScript.insertAdjacentHTML('afterend', centerMap())</script>
+            <div class="stagecard">
+              <div class="turnbar"><span class="avatar" style="--c:var(--p1)" id="avT"></span>Lượt của bạn<span class="t">0:21</span></div>
+              <div class="dice">
+                <div class="die"><i style="grid-area:1/1"></i><i style="grid-area:1/3"></i><i style="grid-area:3/1"></i><i style="grid-area:3/3"></i></div>
+                <div class="die b"><i style="grid-area:1/1"></i><i style="grid-area:3/3"></i></div>
+              </div>
+              <div class="deed">
+                <div class="head"><div class="d">Quận 1</div><h2>Nguyễn Huệ</h2></div>
+                <div class="body">
+                  <div class="price"><b>4.000.000 đ</b><span>còn lại 5,2tr</span></div>
+                  <div class="why"><span class="star"><svg viewBox="0 0 24 24" fill="#f2c14e" stroke="#b5801c" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2l3 6.5 7 .8-5.2 4.8 1.5 7L12 17.6 5.7 21l1.5-7L2 9.3l7-.8z"/></svg></span>
+                    <span>Đủ bộ Quận 1<small>Thuê ×2 và được xây nhà</small></span></div>
+                  <div class="actions"><button class="btn btn-primary">Mua</button><button class="btn btn-ghost">Đấu giá</button></div>
+                  <span class="more">Xem bảng tiền thuê</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="rail">
+      <h3>Tài sản của bạn</h3>
+      <div class="card portfolio">
+        <div class="grp"><div><div class="t"><i style="background:var(--q8)"></i>Quận 8</div><div class="dots"><i style="background:var(--q8)"></i><i style="background:var(--q8)"></i><i style="background:var(--q8)"></i></div></div>
+          <button class="btn btn-gold mini">Xây nhà</button></div>
+        <div class="grp"><div><div class="t"><i style="background:var(--q1)"></i>Quận 1</div><div class="dots"><i style="background:var(--q1)"></i><i></i></div></div>
+          <span class="hint">còn 1 ô</span></div>
+        <div class="grp"><div><div class="t"><i style="background:#6e6a63"></i>Bến xe &amp; ga</div><div class="dots"><i style="background:#6e6a63"></i><i></i><i></i><i></i></div></div>
+          <span class="hint">còn 3 ô</span></div>
+      </div>
+
+      <h3>Bản tin</h3>
+      <div class="card feed">
+        <div class="ev"><span class="dot" style="background:var(--p2)"></span><span><b>Lan</b> trả bạn tiền thuê</span><span class="amt plus">+300k</span></div>
+        <div class="ev"><span class="dot" style="background:var(--p2)"></span><span><b>Lan</b> xây nhà Võ Văn Tần</span><span class="amt minus">−1,5tr</span></div>
+        <div class="ev"><span class="dot" style="background:var(--p3)"></span><span><b>Phúc</b> vào tạm giam</span><span></span></div>
+        <div class="ev"><span class="dot" style="background:var(--p4)"></span><span><b>Hải</b> mất kết nối</span><span></span></div>
+        <span class="all">Xem toàn bộ 64 sự kiện</span>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+  renderBoard(document.getElementById('board'), {
+    owners: { 6:'p1', 8:'p1', 9:'p1', 37:'p1', 15:'p1', 26:'p2', 27:'p2', 29:'p2', 31:'p3', 34:'p3', 5:'p3', 25:'p3', 21:'p4', 23:'p4', 11:'p4', 12:'p4' },
+    houses: { 6:1, 8:1, 9:1, 26:2, 27:2, 29:3 },
+    mortgaged: [11], landing: 39, trail: [37, 38],
+    tokens: [
+      { seat:'p1', vehicle:'cub', at:39, active:true },
+      { seat:'p2', vehicle:'xichlo', at:27 },
+      { seat:'p3', vehicle:'vespa', at:10 },
+      { seat:'p4', vehicle:'bus', at:20 },
+    ],
+  });
+  const V = ['cub','xichlo','vespa','bus'];
+  ['av1','av2','av3','av4'].forEach((id,i)=>document.getElementById(id).innerHTML = VEHICLE[V[i]]);
+  document.getElementById('avT').innerHTML = VEHICLE.cub;
+</script>
+<script src="notes.js"></script>
+<script>
+  showNotes([
+    { n:1, x:600, y:250 }, { n:2, x:508, y:500 }, { n:3, x:12, y:104 },
+    { n:4, x:12, y:384 }, { n:5, x:1118, y:104 }, { n:6, x:404, y:756 }, { n:7, x:1118, y:370 }, { n:8, x:1040, y:690 },
+  ]);
+</script>
+</body>
+</html>

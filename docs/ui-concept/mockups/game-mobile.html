@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup · Màn chơi mobile</title>
+<link rel="stylesheet" href="shared.css">
+<script src="board.js"></script>
+<style>
+  body { width: 390px; height: 844px; position: relative; }
+  .top { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; color: #f4ead6; background: var(--table-deep); }
+  .top b { font: 800 17px var(--f-display); }
+  .top .r { display: flex; gap: 8px; }
+  .ib { width: 34px; height: 34px; border-radius: 10px; background: rgba(255,255,255,.08); display: grid; place-items: center; }
+  .ib svg { width: 18px; height: 18px; }
+
+  .strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 10px 10px 8px; background: var(--table-deep); }
+  .pl { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px 6px; border-radius: 12px; background: rgba(255,255,255,.06); color: #f4ead6; position: relative; }
+  .pl.on { background: var(--plaster); color: var(--ink); box-shadow: 0 0 0 2px var(--gold); }
+  .pl .avatar { width: 38px; height: 38px; border-width: 2px; }
+  .pl .avatar svg { width: 20px; height: 20px; }
+  .pl .n { font: 700 12px var(--f-ui); }
+  .pl .c { font: 800 14px var(--f-display); }
+  .pl .badge { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: #fde6c6; }
+  .pl .badge svg { width: 11px; height: 11px; }
+  .pl.off { opacity: .6; }
+
+  .cam { position: relative; height: 394px; overflow: hidden; }
+  .cam > .board { position: absolute; width: 900px; height: 900px; left: -515px; top: -506px; }
+  .cam > .board .tile .name { font-size: 15px; }
+  .cam > .board .tile .price { font-size: 13px; }
+  .mini { position: absolute; left: 10px; top: 10px; width: 112px; height: 112px; border-radius: 12px; overflow: hidden; background: var(--plaster-edge); box-shadow: 0 6px 14px rgba(0,0,0,.4); border: 2px solid #fff; }
+  .mini .board { width: 900px; height: 900px; transform: scale(.1205); transform-origin: 0 0; }
+  .mini .vp { position: absolute; right: 2px; bottom: 2px; width: 50px; height: 42px; border: 2.5px solid var(--son); border-radius: 4px; }
+  .recenter { position: absolute; right: 10px; top: 10px; z-index: 6; height: 34px; padding: 0 12px; border-radius: 999px; background: var(--ink); color: var(--plaster); font: 700 12px var(--f-ui); display: flex; align-items: center; gap: 6px; }
+  .recenter svg { width: 14px; height: 14px; }
+  .toast { z-index: 6; position: absolute; left: 50%; top: 52px; transform: translateX(-50%); white-space: nowrap; background: #fff; border-radius: 999px; padding: 6px 14px; font: 600 13px var(--f-ui); box-shadow: var(--shadow-card); display: flex; gap: 6px; align-items: center; }
+  .toast b { font-family: var(--f-display); color: #1f7a45; }
+
+  .sheet { gap: 14px; position: absolute; left: 0; right: 0; bottom: 0; height: 300px; background: #fffaf0; border-radius: 22px 22px 0 0; box-shadow: 0 -12px 30px rgba(0,0,0,.35); padding: 8px 18px 18px; display: flex; flex-direction: column; }
+  .grab { width: 44px; height: 5px; border-radius: 3px; background: var(--plaster-edge); align-self: center; }
+  .sh-head { display: flex; align-items: center; gap: 12px; }
+  .plate { width: 8px; align-self: stretch; border-radius: 4px; background: var(--q1); }
+  .sh-head h2 { font: 800 26px/1 var(--f-display); }
+  .sh-head .eyebrow { font-size: 11px; }
+  .sh-head .px { margin-left: auto; text-align: right; }
+  .sh-head .px b { font: 800 20px var(--f-display); display: block; }
+  .sh-head .px small { font: 500 11px var(--f-ui); color: var(--ink-3); }
+  .why { display: flex; align-items: center; gap: 12px; font: 600 15px var(--f-ui); color: #6a4a07; padding: 4px 0; }
+  .why .star { width: 34px; height: 34px; border-radius: 50%; background: #fff0c2; display: grid; place-items: center; flex-shrink: 0; }
+  .why .star svg { width: 20px; height: 20px; }
+  .why small { display: block; font-weight: 500; font-size: 12px; color: var(--ink-3); }
+  .more { font: 500 12px var(--f-ui); color: var(--ink-3); text-align: center; text-decoration: underline; text-underline-offset: 3px; }
+  .acts { display: grid; grid-template-columns: 1.5fr 1fr; gap: 10px; margin-top: auto; }
+  .acts .btn { height: 58px; }
+  .timer { height: 6px; border-radius: 3px; background: var(--plaster-2); overflow: hidden; }
+  .timer i { display: block; height: 100%; width: 70%; background: var(--gold); }
+</style>
+</head>
+<body class="gachbong-bg">
+  <div class="top">
+    <b>Cờ Tỷ Phú Sài Gòn</b>
+    <div class="r">
+      <span class="ib"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>
+      <span class="ib"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span>
+    </div>
+  </div>
+  <div class="strip">
+    <div class="pl on"><span class="avatar" style="--c:var(--p1)"></span><span class="n">Bạn</span><span class="c num">9,2tr</span></div>
+    <div class="pl"><span class="avatar" style="--c:var(--p2)"></span><span class="n">Lan</span><span class="c num">6,45tr</span></div>
+    <div class="pl"><span class="avatar" style="--c:var(--p3)"></span><span class="n">Phúc</span><span class="c num">11,8tr</span><span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="#8a5208" stroke-width="2.5"><path d="M9 4v16M15 4v16"/></svg></span></div>
+    <div class="pl off"><span class="avatar" style="--c:var(--p4)"></span><span class="n">Hải</span><span class="c num">3,1tr</span><span class="badge" style="background:#e7e1d6"><svg viewBox="0 0 24 24" fill="none" stroke="#5c5145" stroke-width="2.5"><path d="M3 3l18 18"/></svg></span></div>
+  </div>
+
+  <div class="cam">
+    <div class="board" id="b"><div class="center"><script>document.currentScript.insertAdjacentHTML('afterend', centerMap())</script></div></div>
+    <div class="mini"><div class="board" id="m"><div class="center"><script>document.currentScript.insertAdjacentHTML('afterend', centerMap())</script></div></div><span class="vp"></span></div>
+    <span class="recenter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Theo quân</span>
+    <span class="toast">Lan trả bạn tiền thuê <b class="num">+300k</b></span>
+  </div>
+
+  <div class="sheet">
+    <span class="grab"></span>
+    <div class="timer"><i></i></div>
+    <div class="sh-head">
+      <span class="plate"></span>
+      <div><span class="eyebrow">Quận 1</span><h2>Nguyễn Huệ</h2></div>
+      <div class="px"><b class="num">4.000.000 đ</b><small>còn lại 5,2tr</small></div>
+    </div>
+    <div class="why"><span class="star"><svg viewBox="0 0 24 24" fill="#f2c14e" stroke="#b5801c" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2l3 6.5 7 .8-5.2 4.8 1.5 7L12 17.6 5.7 21l1.5-7L2 9.3l7-.8z"/></svg></span><span>Đủ bộ Quận 1<small>Thuê ×2 và được xây nhà</small></span></div>
+    <div class="acts">
+      <button class="btn btn-primary">Mua</button>
+      <button class="btn btn-ghost">Đấu giá</button>
+    </div>
+    <span class="more">Xem bảng tiền thuê</span>
+  </div>
+
+<script>
+  const st = {
+    owners: { 6:'p1', 8:'p1', 9:'p1', 37:'p1', 15:'p1', 26:'p2', 27:'p2', 29:'p2', 31:'p3', 34:'p3', 5:'p3', 25:'p3', 21:'p4', 23:'p4', 11:'p4', 12:'p4' },
+    houses: { 6:1, 8:1, 9:1, 26:2, 27:2, 29:3 }, mortgaged: [11], landing: 39, trail: [37, 38],
+    tokens: [{ seat:'p1', vehicle:'cub', at:39, active:true }, { seat:'p2', vehicle:'xichlo', at:27 }, { seat:'p3', vehicle:'vespa', at:10 }, { seat:'p4', vehicle:'bus', at:20 }],
+  };
+  renderBoard(document.getElementById('b'), st);
+  renderBoard(document.getElementById('m'), Object.assign({}, st, { compact: true }));
+  const V = ['cub','xichlo','vespa','bus'];
+  document.querySelectorAll('.strip .avatar').forEach((a,i)=>a.innerHTML = VEHICLE[V[i]]);
+</script>
+</body>
+</html>
