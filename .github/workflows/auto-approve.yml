@@ -1,0 +1,62 @@
+name: Auto Approve
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-approve:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify and approve PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No associated pull request found (likely a fork PR); skipping."
+            exit 0
+          fi
+
+          pr_json=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state,headRefOid,headRepository,headRepositoryOwner)
+          pr_state=$(jq -r '.state' <<< "$pr_json")
+          pr_head_sha=$(jq -r '.headRefOid' <<< "$pr_json")
+          pr_head_owner=$(jq -r '.headRepositoryOwner.login' <<< "$pr_json")
+          pr_head_repo=$(jq -r '.headRepository.name' <<< "$pr_json")
+
+          if [ "$pr_state" != "OPEN" ]; then
+            echo "PR #$PR_NUMBER is $pr_state; skipping."
+            exit 0
+          fi
+
+          if [ "$pr_head_owner" != "$REPO_OWNER" ] || [ "$pr_head_repo" != "$REPO_NAME" ]; then
+            echo "PR #$PR_NUMBER is from external repo ${pr_head_owner}/${pr_head_repo}; skipping."
+            exit 0
+          fi
+
+          if [ "$pr_head_sha" != "$HEAD_SHA" ]; then
+            echo "PR #$PR_NUMBER head moved to $pr_head_sha (CI ran on $HEAD_SHA); skipping."
+            exit 0
+          fi
+
+          gh pr review "$PR_NUMBER" --repo "$REPO" --approve \
+            --body "Auto-approved: CI passed for ${HEAD_SHA:0:7}."
+
+          # Enable auto-merge; fall back to direct merge if the PR is already in a clean mergeable state.
+          gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --merge || \
+            gh pr merge "$PR_NUMBER" --repo "$REPO" --merge

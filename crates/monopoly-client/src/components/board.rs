@@ -869,17 +869,23 @@ pub fn Board(
                     if !is_my_turn {
                         if let Some(cur_p) = st.current_player() {
                             let seat_idx = st.players.iter().position(|p| p.id == cur_p.id).unwrap_or(0);
-                            let wait_text = if is_local_mode.get() {
-                                format!("Đang chờ {}…", cur_p.name)
-                            } else {
-                                let t_sec = timer_seconds.get();
-                                format!("Đang chờ {}… ({}:{:02})", cur_p.name, t_sec / 60, t_sec % 60)
-                            };
+                            let cur_name = cur_p.name.clone();
+                            let local = is_local_mode.get();
                             return view! {
                                 <div class="board-center-stage">
                                     <div class="stage-waiting-pill">
                                         <PlayerAvatar seat_idx=seat_idx size=20 />
-                                        <span>{wait_text}</span>
+                                        <span>
+                                            {if local {
+                                                format!("Đang chờ {}…", cur_name).into_view()
+                                            } else {
+                                                let name_for_timer = cur_name.clone();
+                                                (move || {
+                                                    let t_sec = timer_seconds.get();
+                                                    format!("Đang chờ {}… ({}:{:02})", name_for_timer, t_sec / 60, t_sec % 60)
+                                                }).into_view()
+                                            }}
+                                        </span>
                                     </div>
                                 </div>
                             }.into_view();
