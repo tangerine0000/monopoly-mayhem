@@ -130,6 +130,8 @@ pub enum ClientMessage {
     EndTurn,
     ConfigureGame {
         enable_auction: bool,
+        #[serde(default)]
+        max_players: Option<u8>,
     },
     StartGame,
     AddBot,

@@ -63,15 +63,22 @@ pub struct AuctionSession {
     pub active_bidders: Vec<PlayerId>,
 }
 
+fn default_max_players() -> u8 {
+    4
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameConfig {
     pub enable_auction: bool,
+    #[serde(default = "default_max_players")]
+    pub max_players: u8,
 }
 
 impl Default for GameConfig {
     fn default() -> Self {
         Self {
             enable_auction: true,
+            max_players: 4,
         }
     }
 }
