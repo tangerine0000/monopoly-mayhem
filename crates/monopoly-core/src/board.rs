@@ -238,12 +238,12 @@ pub fn get_board() -> [Tile; 40] {
                 ],
             }),
         },
-        // 12: Công Ty Cấp Nước Sawaco
+        // 12: Nhà Máy Cấp Nước
         Tile {
             index: 12,
-            name: "Công Ty Cấp Nước Sawaco".to_string(),
+            name: "Nhà Máy Cấp Nước".to_string(),
             kind: TileKind::Utility(UtilityDef {
-                name: "Công Ty Cấp Nước Sawaco".to_string(),
+                name: "Nhà Máy Cấp Nước".to_string(),
                 cost: Money::from_vnd(1_500_000),
                 mortgage_value: Money::from_vnd(750_000),
             }),
@@ -486,12 +486,12 @@ pub fn get_board() -> [Tile; 40] {
                 ],
             }),
         },
-        // 28: Tổng Công Ty Điện Lực EVN
+        // 28: Nhà Máy Điện Lực
         Tile {
             index: 28,
-            name: "Tổng Công Ty Điện Lực EVN".to_string(),
+            name: "Nhà Máy Điện Lực".to_string(),
             kind: TileKind::Utility(UtilityDef {
-                name: "Tổng Công Ty Điện Lực EVN".to_string(),
+                name: "Nhà Máy Điện Lực".to_string(),
                 cost: Money::from_vnd(1_500_000),
                 mortgage_value: Money::from_vnd(750_000),
             }),

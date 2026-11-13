@@ -80,7 +80,7 @@ async fn ws_upgrade(
 
     let room_tx = match state.registry.get(&room_id) {
         Some(tx) => tx.clone(),
-        None => return (StatusCode::NOT_FOUND, "Room not found").into_response(),
+        None => RoomActor::spawn(RoomId(room_id.clone()), state.registry.clone()),
     };
 
     ws.on_upgrade(move |socket| handle_socket(socket, room_tx))

@@ -1,5 +1,6 @@
 mod app;
 mod components;
+pub mod palette;
 mod ws;
 
 use app::App;

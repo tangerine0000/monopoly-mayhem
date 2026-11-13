@@ -87,6 +87,7 @@ pub fn apply_action(
                 return Err(GameRuleError::NotInAuction);
             }
         }
+        ClientMessage::ConfigureGame { .. } => {}
         _ => {
             let current = new_state
                 .current_player()
@@ -308,28 +309,32 @@ pub fn apply_action(
                 });
             }
 
-            let player = new_state.find_player(player_id).unwrap();
-            let pos = player.position;
+            if new_state.config.enable_auction {
+                let player = new_state.find_player(player_id).unwrap();
+                let pos = player.position;
 
-            let active_bidders: Vec<PlayerId> = new_state
-                .players
-                .iter()
-                .filter(|p| !p.is_bankrupt)
-                .map(|p| p.id)
-                .collect();
+                let active_bidders: Vec<PlayerId> = new_state
+                    .players
+                    .iter()
+                    .filter(|p| !p.is_bankrupt)
+                    .map(|p| p.id)
+                    .collect();
 
-            new_state.turn_phase = TurnPhase::Auction;
-            new_state.auction = Some(crate::state::AuctionSession {
-                tile_index: pos,
-                current_bid: Money::ZERO,
-                highest_bidder: None,
-                active_bidders,
-            });
+                new_state.turn_phase = TurnPhase::Auction;
+                new_state.auction = Some(crate::state::AuctionSession {
+                    tile_index: pos,
+                    current_bid: Money::ZERO,
+                    highest_bidder: None,
+                    active_bidders,
+                });
 
-            events.push(ServerMessage::AuctionStarted {
-                tile_index: pos,
-                opening_bid: Money::ZERO,
-            });
+                events.push(ServerMessage::AuctionStarted {
+                    tile_index: pos,
+                    opening_bid: Money::ZERO,
+                });
+            } else {
+                new_state.turn_phase = TurnPhase::TurnEnded;
+            }
         }
 
         ClientMessage::PlaceBid { amount } => {
@@ -370,6 +375,26 @@ pub fn apply_action(
                 bidder: player_id,
                 amount: *amount,
             });
+
+            if auction.active_bidders.len() <= 1 {
+                let final_price = auction.current_bid;
+                let tile_idx = auction.tile_index;
+                if let Some(winner_player) = new_state.find_player_mut(player_id) {
+                    winner_player.cash -= final_price;
+                    new_state.properties[tile_idx as usize].owner = Some(player_id);
+                }
+                events.push(ServerMessage::AuctionConcluded {
+                    winner: Some(player_id),
+                    final_price,
+                });
+                events.push(ServerMessage::PropertyAcquired {
+                    player_id,
+                    tile_index: tile_idx,
+                    cost: final_price,
+                });
+                new_state.auction = None;
+                new_state.turn_phase = TurnPhase::TurnEnded;
+            }
         }
 
         ClientMessage::PassAuction => {
@@ -644,6 +669,13 @@ pub fn apply_action(
             } else {
                 new_state.doubles_count = 0;
                 advance_turn(&mut new_state, &mut events);
+            }
+        }
+        ClientMessage::ConfigureGame { enable_auction } => {
+            new_state.config.enable_auction = *enable_auction;
+            if !*enable_auction && new_state.turn_phase == TurnPhase::Auction {
+                new_state.auction = None;
+                new_state.turn_phase = TurnPhase::TurnEnded;
             }
         }
         ClientMessage::JoinRoom { .. } => unreachable!(),
@@ -947,7 +979,7 @@ pub fn handle_bankruptcy(
         .map(|p| p.id)
         .collect();
 
-    if remaining.len() <= 1 {
+    if remaining.is_empty() || (state.players.len() > 1 && remaining.len() <= 1) {
         state.is_game_over = true;
         state.winner = remaining.first().copied();
     } else {
@@ -957,7 +989,7 @@ pub fn handle_bankruptcy(
 
 pub fn advance_turn(state: &mut GameState, events: &mut Vec<ServerMessage>) {
     let active_count = state.players.iter().filter(|p| !p.is_bankrupt).count();
-    if active_count <= 1 {
+    if active_count == 0 || (state.players.len() > 1 && active_count <= 1) {
         state.is_game_over = true;
         state.winner = state.players.iter().find(|p| !p.is_bankrupt).map(|p| p.id);
         return;
