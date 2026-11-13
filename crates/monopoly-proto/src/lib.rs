@@ -131,6 +131,8 @@ pub enum ClientMessage {
     ConfigureGame {
         enable_auction: bool,
     },
+    StartGame,
+    AddBot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

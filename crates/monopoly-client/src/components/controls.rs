@@ -46,7 +46,7 @@ pub fn Controls(
                 </span>
                 {move || {
                     let s = timer_seconds.get();
-                    let urgent = s <= 10;
+                    let urgent = s <= 30;
                     let col = if urgent { STATUS_DANGER } else { TEXT_SECONDARY };
                     view! {
                         <span
@@ -69,9 +69,9 @@ pub fn Controls(
             // Timer Progress Track (uses transform scaleX, zero layout animation)
             <div class="timer-container">
                 <div
-                    class=move || if timer_seconds.get() <= 10 { "timer-fill urgent" } else { "timer-fill" }
+                    class=move || if timer_seconds.get() <= 30 { "timer-fill urgent" } else { "timer-fill" }
                     style=move || {
-                        let ratio = (timer_seconds.get() as f64 / 30.0).clamp(0.0, 1.0);
+                        let ratio = (timer_seconds.get() as f64 / 120.0).clamp(0.0, 1.0);
                         format!("transform: scaleX({:.3});", ratio)
                     }
                 ></div>

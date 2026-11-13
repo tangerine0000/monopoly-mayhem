@@ -230,3 +230,92 @@ async fn test_empty_room_cleanup_after_5_minutes() {
     // Room should be cleanly removed from registry
     assert!(!server.state.registry.contains_key(&room_id.0));
 }
+
+#[tokio::test]
+async fn test_2player_waiting_room_and_host_start_game() {
+    let server = TestServer::spawn().await;
+    let room_id = RoomId("SGN-2P".to_string());
+    let _room_tx = RoomActor::spawn(room_id.clone(), server.state.registry.clone());
+
+    let (mut sink1, mut stream1) = server.connect_ws(&room_id.0).await;
+    send_json(
+        &mut sink1,
+        &ClientMessage::JoinRoom {
+            player_name: "An".to_string(),
+            session_token: None,
+        },
+    )
+    .await;
+    let _ = recv_msg(&mut stream1).await.expect("RoomJoined p1");
+    match recv_msg(&mut stream1).await.expect("SyncSnapshot p1") {
+        ServerMessage::SyncSnapshot { state } => {
+            assert_eq!(state["is_game_started"], false);
+            assert_eq!(state["players"].as_array().unwrap().len(), 1);
+        }
+        other => panic!("Expected SyncSnapshot, got {:?}", other),
+    }
+
+    let (mut sink2, mut stream2) = server.connect_ws(&room_id.0).await;
+    send_json(
+        &mut sink2,
+        &ClientMessage::JoinRoom {
+            player_name: "Bình".to_string(),
+            session_token: None,
+        },
+    )
+    .await;
+    let _ = recv_msg(&mut stream2).await.expect("RoomJoined p2");
+
+    // Host starts the 2-player game
+    send_json(&mut sink1, &ClientMessage::StartGame).await;
+
+    let mut p2_started = false;
+    for _ in 0..5 {
+        if let Some(ServerMessage::GameStarted { turn_order }) = recv_msg(&mut stream2).await {
+            assert_eq!(turn_order.len(), 2);
+            p2_started = true;
+            break;
+        }
+    }
+    assert!(p2_started, "Player 2 should receive GameStarted for 2-player room");
+}
+
+#[tokio::test]
+async fn test_host_add_bot_and_start_game() {
+    let server = TestServer::spawn().await;
+    let room_id = RoomId("SGN-BOT".to_string());
+    let _room_tx = RoomActor::spawn(room_id.clone(), server.state.registry.clone());
+
+    let (mut sink1, mut stream1) = server.connect_ws(&room_id.0).await;
+    send_json(
+        &mut sink1,
+        &ClientMessage::JoinRoom {
+            player_name: "Minh".to_string(),
+            session_token: None,
+        },
+    )
+    .await;
+    let _ = recv_msg(&mut stream1).await.expect("RoomJoined");
+    let _ = recv_msg(&mut stream1).await.expect("Initial SyncSnapshot");
+
+    send_json(&mut sink1, &ClientMessage::AddBot).await;
+    match recv_msg(&mut stream1).await.expect("SyncSnapshot after AddBot") {
+        ServerMessage::SyncSnapshot { state } => {
+            let players = state["players"].as_array().unwrap();
+            assert_eq!(players.len(), 2);
+            assert_eq!(players[1]["is_bot_controlled"], true);
+        }
+        other => panic!("Expected SyncSnapshot, got {:?}", other),
+    }
+
+    send_json(&mut sink1, &ClientMessage::StartGame).await;
+    let mut started = false;
+    for _ in 0..5 {
+        if let Some(ServerMessage::GameStarted { turn_order }) = recv_msg(&mut stream1).await {
+            assert_eq!(turn_order.len(), 2);
+            started = true;
+            break;
+        }
+    }
+    assert!(started, "Host + Bot should start game with 2 players");
+}
