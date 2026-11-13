@@ -6,7 +6,7 @@
     <title>Cờ tỷ phú Sài Gòn</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&family=Be+Vietnam+Pro:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-deepest: #12110f;
@@ -1368,6 +1368,203 @@
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
             }
+        }
+
+        /* Template Picker (Lobby Option) */
+        .template-picker {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .template-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 11px;
+            border-radius: 10px;
+            border: 1px solid var(--border-strong);
+            background: var(--bg-deepest);
+            color: var(--text-sub);
+            cursor: pointer;
+            text-align: left;
+            transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+        }
+
+        .template-option:hover {
+            border-color: var(--text-muted);
+            background: var(--surface-hover);
+        }
+
+        .template-option.active {
+            border-color: var(--accent);
+            background: var(--surface-hover);
+            color: var(--text-main);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+
+        .template-swatch {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            flex-shrink: 0;
+        }
+
+        .template-swatch span {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+        }
+
+        /* ============================================================================
+           Template Option: "Gạch bông & Bảng hiệu" (from docs/ui-concept)
+           ============================================================================ */
+        :root[data-template="gachbong"] {
+            --bg-deepest: #eadcc0;
+            --bg-color: #123430;
+            --surface-color: #f4ead6;
+            --surface-hover: #e5d5b5;
+            --secondary-hover: #d8c49e;
+            --text-main: #1f1a15;
+            --text-sub: #5c5145;
+            --text-muted: #7a6d5d;
+            --text-on-accent: #ffffff;
+            --accent: #c8372d;
+            --accent-hover: #a82b23;
+            --border: rgba(31, 26, 21, 0.14);
+            --border-strong: rgba(31, 26, 21, 0.28);
+            --success: #2f9b62;
+            --warning: #e3a72f;
+            --danger: #c8372d;
+            --font-sans: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --font-display: 'Baloo 2', 'Be Vietnam Pro', sans-serif;
+
+            --board-outer-bg: #d2bf9b;
+            --board-center-bg: #efe3c9;
+            --board-center-border: #b9a580;
+            --tile-bg: #f4ead6;
+            --tile-corner-bg: #eadcc0;
+            --tile-selected-stroke: #e3a72f;
+            --tile-stroke: #c4b08a;
+            --tile-text-primary: #1f1a15;
+            --tile-text-muted: #5c5145;
+            --tile-corner-accent: rgba(31, 26, 21, 0.16);
+            --tile-chance-bg: #fce6c8;
+            --tile-chance-inner-bg: #f5d09b;
+            --tile-chance-border: #c8372d;
+            --tile-chest-bg: #f9e6b3;
+            --tile-chest-inner-bg: #f2d488;
+            --tile-chest-border: #e3a72f;
+        }
+
+        :root[data-template="gachbong"] .lobby-shell,
+        :root[data-template="gachbong"] .game-layout {
+            background-color: #123430;
+            background-image:
+                radial-gradient(ellipse at 50% 40%, rgba(255, 255, 255, 0.06), transparent 60%),
+                url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.065' stroke-width='2'%3E%3Ccircle cx='0' cy='0' r='34'/%3E%3Ccircle cx='120' cy='0' r='34'/%3E%3Ccircle cx='0' cy='120' r='34'/%3E%3Ccircle cx='120' cy='120' r='34'/%3E%3Cpath d='M60 26 L94 60 L60 94 L26 60 Z'/%3E%3Ccircle cx='60' cy='60' r='12'/%3E%3Cpath d='M60 26 Q72 48 60 60 Q48 48 60 26 M94 60 Q72 72 60 60 Q72 48 94 60 M60 94 Q48 72 60 60 Q72 72 60 94 M26 60 Q48 48 60 60 Q48 72 26 60'/%3E%3C/g%3E%3C/svg%3E");
+        }
+
+        :root[data-template="gachbong"] .game-header {
+            background: #f4ead6;
+            border-bottom: 2px solid #d2bf9b;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+        }
+
+        :root[data-template="gachbong"] .header-title-text {
+            font-family: var(--font-display);
+            font-weight: 700 !important;
+            font-size: 18px !important;
+        }
+
+        :root[data-template="gachbong"] .lobby-hero h1 {
+            color: #f4ead6 !important;
+            font-family: var(--font-display);
+            font-weight: 700 !important;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+        }
+
+        :root[data-template="gachbong"] .lobby-hero p,
+        :root[data-template="gachbong"] .lobby-hero span {
+            color: #d6cbb5 !important;
+        }
+
+        :root[data-template="gachbong"] .lobby-form-card {
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset, 0 24px 48px -18px rgba(0, 0, 0, 0.55);
+            border-color: #d2bf9b !important;
+        }
+
+        :root[data-template="gachbong"] .lobby-tabs {
+            background: #eadcc0;
+            border-color: #d2bf9b;
+        }
+
+        :root[data-template="gachbong"] .lobby-tab.active {
+            background: #f4ead6;
+            color: #1f1a15;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        }
+
+        :root[data-template="gachbong"] .board-aspect-frame {
+            border-radius: 14px;
+            box-shadow: 0 28px 60px -24px rgba(0, 0, 0, 0.72), 0 0 0 4px #b9a580;
+        }
+
+        :root[data-template="gachbong"] .stage-card {
+            background: rgba(244, 234, 214, 0.96);
+            border: 1.5px solid #d2bf9b;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset, 0 16px 32px -12px rgba(0, 0, 0, 0.42);
+            color: #1f1a15;
+        }
+
+        :root[data-template="gachbong"] .stage-drawn-card.chance {
+            background: linear-gradient(135deg, #fce6c8 0%, #f5d09b 100%);
+            border-color: #c8372d;
+            color: #1f1a15;
+        }
+
+        :root[data-template="gachbong"] .stage-drawn-card.chest {
+            background: linear-gradient(135deg, #f9e6b3 0%, #f2d488 100%);
+            border-color: #e3a72f;
+            color: #1f1a15;
+        }
+
+        :root[data-template="gachbong"] .stage-waiting-pill {
+            background: rgba(244, 234, 214, 0.94);
+            border: 1.5px solid #d2bf9b;
+            color: #1f1a15;
+        }
+
+        :root[data-template="gachbong"] .floating-dice-hud {
+            background: rgba(244, 234, 214, 0.95);
+            border: 1.5px solid #d2bf9b;
+            box-shadow: 0 14px 28px -10px rgba(0, 0, 0, 0.45);
+        }
+
+        :root[data-template="gachbong"] .btn-roll-dice {
+            font-family: var(--font-display);
+            background: linear-gradient(#d9473b, #c8372d);
+            color: #ffffff;
+            box-shadow: 0 -4px 0 #9b2820 inset, 0 8px 18px -6px rgba(200, 55, 45, 0.65);
+        }
+
+        :root[data-template="gachbong"] .btn-hud-buy {
+            font-family: var(--font-display);
+            background: linear-gradient(#ffd56a, #e3a72f);
+            color: #2a1712;
+            box-shadow: 0 -3px 0 #b5801c inset;
+        }
+
+        :root[data-template="gachbong"] .btn-hud-secondary {
+            background: #eadcc0;
+            color: #1f1a15;
+            border-color: #d2bf9b;
+        }
+
+        :root[data-template="gachbong"] .board-camera-hud {
+            background: rgba(244, 234, 214, 0.92);
+            border-color: #d2bf9b;
         }
     </style>
 </head>

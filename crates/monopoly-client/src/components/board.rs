@@ -2176,8 +2176,8 @@ mod tests {
             let pips = svg_die_pips_centered(val);
             assert_eq!(pips.len(), val as usize);
             for (px, py, is_red) in pips {
-                assert!(px >= -16.0 && px <= 16.0);
-                assert!(py >= -16.0 && py <= 16.0);
+                assert!((-16.0..=16.0).contains(&px));
+                assert!((-16.0..=16.0).contains(&py));
                 assert_eq!(is_red, val == 1 || val == 4);
             }
         }

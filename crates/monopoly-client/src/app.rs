@@ -108,11 +108,13 @@ fn decide_local_bot_action(state: &GameState, player_id: PlayerId) -> Option<Cli
     }
 }
 
+type DeferredTask = std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>>;
+
 fn schedule_when_animation_done(
     is_rolling: ReadSignal<bool>,
     is_animating_move: ReadSignal<bool>,
     delay_ms: u64,
-    task: std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>>,
+    task: DeferredTask,
 ) {
     set_timeout(
         move || {
@@ -126,6 +128,7 @@ fn schedule_when_animation_done(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_local_action(
     actor_id: PlayerId,
     action: ClientMessage,
@@ -223,7 +226,7 @@ fn execute_local_action(
                 && new_state.players.len() > 1
             {
                 let delay_ms = if had_roll { 350 } else { 300 };
-                let task: std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>> =
+                let task: DeferredTask =
                     std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(move || {
                         if !is_local_mode.get_untracked() {
                             return;
@@ -268,7 +271,7 @@ fn execute_local_action(
 
             if let Some(bot_id) = next_bot_id {
                 let delay_ms = if had_roll { 450 } else { 550 };
-                let task: std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>> =
+                let task: DeferredTask =
                     std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(move || {
                         if !is_local_mode.get_untracked() {
                             return;
