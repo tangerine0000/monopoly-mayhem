@@ -3,23 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cờ Tỷ Phú Sài Gòn - Vietnamese Monopoly</title>
+    <title>Cờ tỷ phú Sài Gòn</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,350;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-color: #0f172a;
-            --surface-color: #1e293b;
-            --surface-hover: #334155;
-            --text-main: #f8fafc;
-            --text-sub: #94a3b8;
-            --accent: #e11d48;
-            --accent-hover: #be123c;
-            --border: #334155;
-            --success: #10b981;
-            --warning: #f59e0b;
-            --info: #0ea5e9;
+            --bg-deepest: #12110f;
+            --bg-color: #161513;
+            --surface-color: #1c1a18;
+            --surface-hover: #262421;
+            --text-main: #efe9de;
+            --text-sub: #aaa398;
+            --text-muted: #8a847a;
+            --accent: #d9383a;
+            --accent-hover: #b82d2f;
+            --border: rgba(239, 233, 222, 0.08);
+            --border-strong: rgba(239, 233, 222, 0.14);
+            --success: #4cc38a;
+            --warning: #d49b35;
+            --danger: #e5484d;
+            --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+            --font-sans: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --font-mono: 'IBM Plex Mono', monospace;
         }
 
         * {
@@ -30,48 +36,92 @@
             -webkit-user-select: none;
         }
 
-        body {
-            font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        html, body {
+            font-family: var(--font-sans);
             background-color: var(--bg-color);
             color: var(--text-main);
-            overflow-x: hidden;
-            min-height: 100vh;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            font-size: 14px;
+            line-height: 20px;
+            -webkit-font-smoothing: antialiased;
         }
 
-        #app {
+        .mono {
+            font-family: var(--font-mono);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .tabular {
+            font-variant-numeric: tabular-nums;
+        }
+
+        .app-shell {
             display: flex;
             flex-direction: column;
-            min-height: 100vh;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
         }
 
-        /* Responsive Layouts */
+        /* 2-Column Playzone + Controls Layout on 4px grid */
         .game-layout {
+            flex: 1;
+            min-height: 0;
             display: grid;
-            grid-template-columns: 280px 1fr 320px;
+            grid-template-columns: minmax(0, 1fr) 360px;
             gap: 16px;
-            padding: 16px;
-            max-width: 1700px;
-            margin: 0 auto;
+            padding: 16px 24px;
             width: 100%;
-            height: calc(100vh - 20px);
+            height: calc(100vh - 56px);
+            overflow: hidden;
         }
 
-        @media (max-width: 1200px) {
-            .game-layout {
-                grid-template-columns: 260px 1fr;
-            }
-            .right-column {
-                display: none;
-            }
+        .right-column {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 0;
+            height: 100%;
+            overflow-y: auto;
         }
 
-        @media (max-width: 850px) {
+        /* Lobby Asymmetric Split Layout */
+        .lobby-shell {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 24px;
+            overflow-y: auto;
+        }
+
+        .lobby-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 420px) minmax(0, 460px);
+            gap: 32px;
+            max-width: 912px;
+            width: 100%;
+            align-items: center;
+        }
+
+        @media (max-width: 900px) {
+            html, body, .app-shell {
+                height: auto;
+                min-height: 100vh;
+                overflow-y: auto;
+            }
             .game-layout {
                 display: flex;
                 flex-direction: column;
                 height: auto;
-                padding: 8px;
+                padding: 12px 16px;
                 gap: 12px;
+            }
+            .lobby-grid {
+                grid-template-columns: 1fr;
+                gap: 24px;
             }
         }
 
@@ -79,77 +129,111 @@
             background: var(--surface-color);
             border-radius: 12px;
             border: 1px solid var(--border);
-            padding: 14px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+            padding: 16px;
             display: flex;
             flex-direction: column;
             gap: 12px;
-            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .lobby-card-enter {
+            animation: lobby-fade-in 320ms var(--ease-out) forwards;
+        }
+
+        @keyframes lobby-fade-in {
+            0%   { opacity: 0; transform: translateY(8px); }
+            100% { opacity: 1; transform: translateY(0); }
         }
 
         .btn {
-            background-color: var(--accent);
-            color: white;
-            border: none;
+            background-color: var(--text-main);
+            color: var(--bg-deepest);
+            border: 1px solid transparent;
             border-radius: 8px;
-            padding: 10px 18px;
-            font-weight: 600;
-            font-size: 0.95rem;
+            padding: 8px 16px;
+            font-family: var(--font-sans);
+            font-weight: 500;
+            font-size: 14px;
+            line-height: 20px;
             cursor: pointer;
-            transition: all 0.15s ease-in-out;
-            min-height: 44px;
+            transition: background-color 150ms var(--ease-out), border-color 150ms var(--ease-out), color 150ms var(--ease-out), transform 150ms var(--ease-out), opacity 150ms var(--ease-out);
+            min-height: 40px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
         }
 
         .btn:hover:not(:disabled) {
-            background-color: var(--accent-hover);
-            transform: translateY(-1px);
+            background-color: #dcd5c7;
+        }
+
+        .btn:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+
+        .btn:focus-visible {
+            outline: 2px solid var(--warning);
+            outline-offset: 2px;
         }
 
         .btn:disabled {
-            opacity: 0.45;
+            opacity: 0.4;
             cursor: not-allowed;
             transform: none;
         }
 
         .btn-secondary {
-            background-color: #3b82f6;
+            background-color: var(--surface-hover);
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
         }
+
         .btn-secondary:hover:not(:disabled) {
-            background-color: #2563eb;
+            background-color: #302d29;
+            border-color: var(--border-strong);
         }
 
         .btn-outline {
             background-color: transparent;
             border: 1px solid var(--border);
             color: var(--text-main);
+            box-shadow: none;
         }
+
         .btn-outline:hover:not(:disabled) {
             background-color: var(--surface-hover);
+            border-color: var(--border-strong);
         }
 
         input {
-            background-color: #0f172a;
+            background-color: var(--bg-deepest);
             border: 1px solid var(--border);
-            color: white;
-            padding: 10px 14px;
+            color: var(--text-main);
+            padding: 8px 12px;
+            height: 40px;
             border-radius: 8px;
-            font-size: 1rem;
+            font-family: var(--font-sans);
+            font-size: 14px;
+            line-height: 20px;
             outline: none;
             width: 100%;
+            transition: border-color 150ms var(--ease-out), background-color 150ms var(--ease-out);
         }
 
         input:focus {
-            border-color: var(--accent);
+            border-color: var(--border-strong);
+            background-color: #181714;
         }
 
         /* SVG Board styling */
         .board-container {
             width: 100%;
             height: 100%;
+            min-width: 0;
+            min-height: 0;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -157,42 +241,224 @@
         }
 
         svg.board-svg {
+            width: 100%;
+            height: 100%;
             max-width: 100%;
             max-height: 100%;
-            aspect-ratio: 1 / 1;
-            filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.5));
-            border-radius: 14px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
         }
 
         .tile-rect {
             cursor: pointer;
-            transition: opacity 0.15s;
-        }
-        .tile-rect:hover {
-            opacity: 0.9;
+            transition: opacity 150ms var(--ease-out);
         }
 
+        .tile-rect:hover .tile-base-rect {
+            fill: #262421;
+        }
+
+        .tile-base-rect {
+            transition: fill 150ms var(--ease-out), stroke 150ms var(--ease-out), stroke-width 150ms var(--ease-out);
+        }
+
+        /* Smooth Step-by-Step Pawn Translation & Hop Arc */
         .pawn-marker {
-            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transition: transform 115ms var(--ease-out);
+            will-change: transform;
+            cursor: pointer;
         }
 
-        /* Turn countdown timer bar */
+        .pawn-body.hopping {
+            animation: pawn-hop-arc 115ms var(--ease-out) infinite;
+        }
+
+        .pawn-shadow.hopping {
+            animation: pawn-shadow-hop 115ms var(--ease-out) infinite;
+        }
+
+        @keyframes pawn-hop-arc {
+            0%   { transform: translateY(0px); }
+            50%  { transform: translateY(-12px); }
+            100% { transform: translateY(0px); }
+        }
+
+        @keyframes pawn-shadow-hop {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50%      { transform: scale(0.65); opacity: 0.25; }
+        }
+
+        /* Destination Tile Landing Ring & Property Acquisition */
+        .landing-shockwave-ring {
+            animation: tile-landing-ripple 480ms var(--ease-out) forwards;
+            transform-box: fill-box;
+            transform-origin: center;
+            pointer-events: none;
+        }
+
+        @keyframes tile-landing-ripple {
+            0%   { transform: scale(0.6); opacity: 0.85; }
+            100% { transform: scale(1.45); opacity: 0; }
+        }
+
+        .owner-badge-pop {
+            animation: owner-badge-stamp 300ms var(--ease-out) forwards;
+            transform-box: fill-box;
+            transform-origin: center;
+        }
+
+        @keyframes owner-badge-stamp {
+            0%   { transform: scale(0.6); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .house-icon-pop {
+            animation: house-build-enter 300ms var(--ease-out) forwards;
+            transform-box: fill-box;
+            transform-origin: bottom center;
+        }
+
+        @keyframes house-build-enter {
+            0%   { transform: translateY(-6px); opacity: 0; }
+            100% { transform: translateY(0px); opacity: 1; }
+        }
+
+        /* Floating Cash Delta on Board & Sidebar */
+        .svg-cash-float {
+            animation: svg-cash-float-up 1400ms var(--ease-out) forwards;
+            pointer-events: none;
+        }
+
+        @keyframes svg-cash-float-up {
+            0%   { opacity: 0; transform: translateY(6px); }
+            15%  { opacity: 1; transform: translateY(-4px); }
+            80%  { opacity: 1; transform: translateY(-20px); }
+            100% { opacity: 0; transform: translateY(-28px); }
+        }
+
+        .ui-cash-delta {
+            animation: ui-cash-delta-pop 1400ms var(--ease-out) forwards;
+            display: inline-block;
+        }
+
+        @keyframes ui-cash-delta-pop {
+            0%   { opacity: 0; transform: translateY(4px); }
+            20%  { opacity: 1; transform: translateY(0); }
+            80%  { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-4px); }
+        }
+
+        .cash-pill-gain {
+            animation: cash-flash-gain 600ms var(--ease-out);
+        }
+
+        .cash-pill-loss {
+            animation: cash-flash-loss 600ms var(--ease-out);
+        }
+
+        @keyframes cash-flash-gain {
+            0%   { background-color: rgba(76, 195, 138, 0.2); }
+            100% { background-color: var(--bg-deepest); }
+        }
+
+        @keyframes cash-flash-loss {
+            0%   { background-color: rgba(229, 72, 77, 0.2); }
+            100% { background-color: var(--bg-deepest); }
+        }
+
+        /* Center-Board SVG Dice Animations */
+        @keyframes svg-dice-spin-left {
+            0%   { transform: translate(0px, 0px) rotate(0deg); }
+            25%  { transform: translate(-8px, -10px) rotate(-90deg); }
+            50%  { transform: translate(6px, 4px) rotate(-180deg); }
+            75%  { transform: translate(-4px, -6px) rotate(-270deg); }
+            100% { transform: translate(0px, 0px) rotate(-360deg); }
+        }
+
+        @keyframes svg-dice-spin-right {
+            0%   { transform: translate(0px, 0px) rotate(0deg); }
+            25%  { transform: translate(8px, -10px) rotate(90deg); }
+            50%  { transform: translate(-6px, 4px) rotate(180deg); }
+            75%  { transform: translate(4px, -6px) rotate(270deg); }
+            100% { transform: translate(0px, 0px) rotate(360deg); }
+        }
+
+        @keyframes svg-dice-settle-bounce {
+            0%   { transform: scale(1.08); }
+            100% { transform: scale(1); }
+        }
+
+        .svg-die-left-rolling {
+            animation: svg-dice-spin-left 320ms linear infinite;
+        }
+
+        .svg-die-right-rolling {
+            animation: svg-dice-spin-right 320ms linear infinite;
+        }
+
+        .svg-die-settled {
+            animation: svg-dice-settle-bounce 240ms var(--ease-out) forwards;
+        }
+
+        /* Title Deed & Drawn Card Entrance Animations */
+        @keyframes deed-pop-in {
+            0%   { opacity: 0; transform: translate(352px, 408px); }
+            100% { opacity: 1; transform: translate(352px, 400px); }
+        }
+
+        .deed-card-group {
+            animation: deed-pop-in 240ms var(--ease-out) forwards;
+        }
+
+        @keyframes card-banner-flip-in {
+            0%   { opacity: 0; transform: translate(332px, 348px); }
+            100% { opacity: 1; transform: translate(332px, 340px); }
+        }
+
+        .card-banner-group {
+            animation: card-banner-flip-in 240ms var(--ease-out) forwards;
+        }
+
+        /* Phase Action Buttons & Log Entry Animations */
+        .phase-action-group {
+            animation: phase-enter 200ms var(--ease-out) forwards;
+        }
+
+        @keyframes phase-enter {
+            0%   { opacity: 0; transform: translateY(4px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        .log-item-enter {
+            animation: log-slide-in 200ms var(--ease-out) forwards;
+        }
+
+        @keyframes log-slide-in {
+            0%   { opacity: 0; transform: translateY(4px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Turn countdown timer bar (quiet track, single semantic tone) */
         .timer-container {
             width: 100%;
-            height: 8px;
-            background: #334155;
+            height: 4px;
+            background: var(--bg-deepest);
             border-radius: 4px;
             overflow: hidden;
         }
 
         .timer-fill {
             height: 100%;
-            background: linear-gradient(90deg, #10b981, #f59e0b, #ef4444);
-            transition: width 1s linear;
+            background: var(--text-sub);
+            transition: transform 300ms var(--ease-out), background-color 150ms var(--ease-out);
+            transform-origin: left center;
+        }
+
+        .timer-fill.urgent {
+            background: var(--danger);
         }
     </style>
 </head>
 <body>
-    <div id="app"></div>
 </body>
 </html>

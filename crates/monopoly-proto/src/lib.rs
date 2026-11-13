@@ -128,6 +128,9 @@ pub enum ClientMessage {
     UseJailCard,
     DeclareBankruptcy,
     EndTurn,
+    ConfigureGame {
+        enable_auction: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -156,11 +156,6 @@ impl RoomActor {
         }
 
         // 2. New Player Join
-        if self.state.is_game_started {
-            let _ = reply.send(Err("Game already in progress".to_string()));
-            return;
-        }
-
         if self.state.players.len() >= 4 {
             let _ = reply.send(Err("Room is full".to_string()));
             return;
@@ -186,14 +181,20 @@ impl RoomActor {
             })
             .await;
 
-        self.broadcast(ServerMessage::SyncSnapshot {
-            state: serde_json::to_value(&self.state).unwrap_or_default(),
-        })
-        .await;
-
-        // Auto-start game if 4 players joined
-        if self.state.players.len() == 4 {
+        if !self.state.is_game_started {
             self.start_game().await;
+        } else {
+            self.state.turn_order.push(p_id);
+            self.broadcast(ServerMessage::SyncSnapshot {
+                state: serde_json::to_value(&self.state).unwrap_or_default(),
+            })
+            .await;
+            if self.state.players.len() == 4 {
+                self.broadcast(ServerMessage::GameStarted {
+                    turn_order: self.state.turn_order.clone(),
+                })
+                .await;
+            }
         }
     }
 

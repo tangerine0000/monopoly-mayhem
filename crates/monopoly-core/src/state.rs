@@ -64,6 +64,19 @@ pub struct AuctionSession {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameConfig {
+    pub enable_auction: bool,
+}
+
+impl Default for GameConfig {
+    fn default() -> Self {
+        Self {
+            enable_auction: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TurnPhase {
     WaitingForRoll,
     TileActionPending,
@@ -73,6 +86,8 @@ pub enum TurnPhase {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
+    #[serde(default)]
+    pub config: GameConfig,
     pub players: Vec<PlayerState>,
     pub turn_order: Vec<PlayerId>,
     pub current_player_index: usize,
@@ -99,6 +114,7 @@ impl Default for GameState {
 impl GameState {
     pub fn new() -> Self {
         Self {
+            config: GameConfig::default(),
             players: Vec::new(),
             turn_order: Vec::new(),
             current_player_index: 0,

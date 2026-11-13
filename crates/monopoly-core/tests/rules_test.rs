@@ -283,3 +283,46 @@ fn test_bankruptcy_asset_surrender() {
         ServerMessage::PlayerBankrupt { player_id } if *player_id == debtor_id
     )));
 }
+
+#[test]
+fn test_decline_property_respects_auction_config_option() {
+    let (mut state, player_ids) = create_test_game();
+    let p1_id = player_ids[0];
+    state.find_player_mut(p1_id).unwrap().position = 1;
+    state.turn_phase = TurnPhase::TileActionPending;
+
+    let mut rng = create_seeded_rng(7);
+
+    // 1. When enable_auction is true (default), DeclineProperty starts an Auction
+    assert!(state.config.enable_auction);
+    let (state_with_auction, events_with_auction) =
+        apply_action(&state, p1_id, &ClientMessage::DeclineProperty, &mut rng).unwrap();
+    assert_eq!(state_with_auction.turn_phase, TurnPhase::Auction);
+    assert!(state_with_auction.auction.is_some());
+    assert!(events_with_auction
+        .iter()
+        .any(|e| matches!(e, ServerMessage::AuctionStarted { tile_index: 1, .. })));
+
+    // 2. When ConfigureGame { enable_auction: false } is applied, DeclineProperty skips Auction
+    let (state_no_auction_cfg, _) = apply_action(
+        &state,
+        p1_id,
+        &ClientMessage::ConfigureGame {
+            enable_auction: false,
+        },
+        &mut rng,
+    )
+    .unwrap();
+    assert!(!state_no_auction_cfg.config.enable_auction);
+
+    let (state_declined, events_declined) = apply_action(
+        &state_no_auction_cfg,
+        p1_id,
+        &ClientMessage::DeclineProperty,
+        &mut rng,
+    )
+    .unwrap();
+    assert_eq!(state_declined.turn_phase, TurnPhase::TurnEnded);
+    assert!(state_declined.auction.is_none());
+    assert!(events_declined.is_empty());
+}
