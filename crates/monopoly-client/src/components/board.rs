@@ -1,10 +1,11 @@
 use crate::palette::{
-    get_district_color, get_district_label, ACCENT_PRIMARY, BG_SECONDARY, BOARD_CENTER_BG,
-    BOARD_CENTER_BORDER, BOARD_OUTER_BG, BORDER_DEFAULT, BORDER_SUBTLE, PLAYER_AVATARS,
-    PLAYER_COLORS, STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_HOVER, SURFACE_PANEL,
-    TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHEST,
+    get_district_color, get_district_label, BG_SECONDARY, BOARD_CENTER_BG, BOARD_CENTER_BORDER,
+    BOARD_OUTER_BG, BORDER_DEFAULT, BORDER_SUBTLE, PLAYER_AVATARS, PLAYER_COLORS, STATUS_DANGER,
+    STATUS_SUCCESS, STATUS_WARNING, SURFACE_HOVER, SURFACE_PANEL, TEXT_MUTED, TEXT_ON_ACCENT,
+    TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHANCE_BG, TILE_CHANCE_BORDER,
+    TILE_CHANCE_INNER_BG, TILE_CHEST, TILE_CHEST_BG, TILE_CHEST_BORDER, TILE_CHEST_INNER_BG,
     TILE_CORNER_ACCENT, TILE_CORNER_BG, TILE_SELECTED_STROKE, TILE_STATION, TILE_STROKE, TILE_TAX,
-    TILE_UTILITY,
+    TILE_TEXT_MUTED, TILE_TEXT_PRIMARY, TILE_UTILITY,
 };
 use leptos::*;
 use monopoly_core::board::{get_board, TileKind};
@@ -91,7 +92,8 @@ fn wrap_tile_name(name: &str, max_chars: usize) -> Vec<String> {
     lines
 }
 
-/// Returns relative `(dx, dy, is_red)` pip positions centered around `(0, 0)` for a `64x64` SVG die face (`1..=6`).
+/// Returns relative `(dx, dy, is_red)` pip positions centered around `(0, 0)` for a `64x64` die face (`1..=6`).
+#[allow(dead_code)]
 fn svg_die_pips_centered(value: u8) -> Vec<(f64, f64, bool)> {
     let l = -16.0;
     let c = 0.0;
@@ -119,6 +121,364 @@ fn svg_die_pips_centered(value: u8) -> Vec<(f64, f64, bool)> {
     }
 }
 
+/// Returns the CSS 3D `transform` that rotates a 6-sided die cube so `value` (`1..=6`) faces the viewer with a subtle tabletop tilt.
+fn die_3d_settled_transform(value: u8) -> &'static str {
+    match value {
+        1 => "rotateX(-14deg) rotateY(16deg)",
+        2 => "rotateX(-14deg) rotateY(-74deg)",
+        3 => "rotateX(-104deg) rotateZ(-14deg)",
+        4 => "rotateX(76deg) rotateZ(14deg)",
+        5 => "rotateX(-14deg) rotateY(106deg)",
+        _ => "rotateX(-14deg) rotateY(196deg)",
+    }
+}
+
+/// Returns which of the 9 cells in a 3x3 grid have a pip for die face `1..=6`.
+fn die_face_pip_mask(value: u8) -> [bool; 9] {
+    match value {
+        1 => [false, false, false, false, true, false, false, false, false],
+        2 => [true, false, false, false, false, false, false, false, true],
+        3 => [true, false, false, false, true, false, false, false, true],
+        4 => [true, false, true, false, false, false, true, false, true],
+        5 => [true, false, true, false, true, false, true, false, true],
+        _ => [true, false, true, true, false, true, true, false, true],
+    }
+}
+
+fn render_3d_die_cube(value: u8, rolling: bool, is_left: bool, is_doubles: bool) -> impl IntoView {
+    let cube_class = if rolling {
+        if is_left {
+            "die-cube rolling-left"
+        } else {
+            "die-cube rolling-right"
+        }
+    } else if is_doubles {
+        "die-cube doubles"
+    } else {
+        "die-cube"
+    };
+
+    let shadow_class = if rolling {
+        "die-shadow rolling"
+    } else {
+        "die-shadow"
+    };
+
+    let cube_style = if rolling {
+        String::new()
+    } else {
+        format!("transform: {};", die_3d_settled_transform(value))
+    };
+
+    view! {
+        <div class="die-scene">
+            <div class=shadow_class></div>
+            <div class=cube_class style=cube_style>
+                {(1..=6u8).map(|face_val| {
+                    let face_cls = format!("die-face die-face-{}", face_val);
+                    let mask = die_face_pip_mask(face_val);
+                    let is_red_face = face_val == 1 || face_val == 4;
+                    view! {
+                        <div class=face_cls>
+                            {mask.into_iter().map(|has_pip| {
+                                if has_pip {
+                                    let pip_cls = if face_val == 1 {
+                                        "die-pip red big-one"
+                                    } else if is_red_face {
+                                        "die-pip red"
+                                    } else {
+                                        "die-pip"
+                                    };
+                                    view! { <span class=pip_cls></span> }.into_view()
+                                } else {
+                                    view! { <span></span> }.into_view()
+                                }
+                            }).collect_view()}
+                        </div>
+                    }
+                }).collect_view()}
+            </div>
+        </div>
+    }
+}
+
+/// Renders crisp vector Monopoly illustrations for corners and special tiles without overlapping text.
+fn render_tile_illustration(idx: u8, kind: &TileKind, rx: f64, ry: f64, w: f64, h: f64) -> impl IntoView {
+    match kind {
+        TileKind::Go => {
+            let cx = rx + w / 2.0;
+            let by = ry + h - 24.0;
+            view! {
+                <g>
+                    <path
+                        d=format!(
+                            "M {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} Z",
+                            cx - 38.0, by,
+                            cx - 18.0, by - 11.0,
+                            cx - 18.0, by - 4.0,
+                            cx + 36.0, by - 4.0,
+                            cx + 36.0, by + 4.0,
+                            cx - 18.0, by + 4.0,
+                            cx - 18.0, by + 11.0
+                        )
+                        fill="#d9383a"
+                        stroke="#1c1a18"
+                        stroke-width="1.2"
+                    />
+                    <text
+                        x=cx
+                        y=ry + 24.0
+                        font-size="9.5"
+                        font-weight="600"
+                        font-family="'Roboto Mono', monospace"
+                        fill="#2b7a53"
+                        text-anchor="middle"
+                    >
+                        "+2.000.000 đ"
+                    </text>
+                </g>
+            }.into_view()
+        }
+        TileKind::Jail => {
+            let jx = rx + w - 76.0;
+            let jy = ry + 6.0;
+            view! {
+                <g>
+                    <rect x=jx y=jy width="70" height="58" rx="4" fill="#d97736" stroke="#1c1a18" stroke-width="1.5" />
+                    <rect x=jx + 14.0 y=jy + 8.0 width="42" height="42" rx="2" fill="#f5f0e4" stroke="#1c1a18" stroke-width="1.5" />
+                    <line x1=jx + 24.0 y1=jy + 8.0 x2=jx + 24.0 y2=jy + 50.0 stroke="#1c1a18" stroke-width="2" />
+                    <line x1=jx + 35.0 y1=jy + 8.0 x2=jx + 35.0 y2=jy + 50.0 stroke="#1c1a18" stroke-width="2" />
+                    <line x1=jx + 46.0 y1=jy + 8.0 x2=jx + 46.0 y2=jy + 50.0 stroke="#1c1a18" stroke-width="2" />
+                </g>
+            }.into_view()
+        }
+        TileKind::FreeParking => {
+            let cx = rx + w / 2.0;
+            let cy = ry + 28.0;
+            view! {
+                <g>
+                    <path
+                        d=format!(
+                            "M {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} Z",
+                            cx - 22.0, cy + 4.0,
+                            cx - 16.0, cy - 10.0,
+                            cx + 12.0, cy - 10.0,
+                            cx + 20.0, cy + 4.0,
+                            cx + 24.0, cy + 12.0,
+                            cx - 24.0, cy + 12.0
+                        )
+                        fill="#d9383a"
+                        stroke="#1c1a18"
+                        stroke-width="1.4"
+                    />
+                    <circle cx=cx - 13.0 cy=cy + 13.0 r="5" fill="#1c1a18" />
+                    <circle cx=cx + 13.0 cy=cy + 13.0 r="5" fill="#1c1a18" />
+                </g>
+            }.into_view()
+        }
+        TileKind::GoToJail => {
+            let cx = rx + w / 2.0;
+            let cy = ry + 26.0;
+            view! {
+                <g>
+                    <circle cx=cx cy=cy r="14" fill="#d9383a" stroke="#1c1a18" stroke-width="1.5" />
+                    <rect x=cx - 2.0 y=cy - 8.0 width="4" height="9" rx="1.5" fill="#f5f0e4" />
+                    <circle cx=cx cy=cy + 5.5 r="2.2" fill="#f5f0e4" />
+                </g>
+            }.into_view()
+        }
+        TileKind::Chance => {
+            let (ix, iy) = if idx < 10 {
+                (rx + w / 2.0, ry + 26.0)
+            } else if idx < 20 {
+                (rx + w - 24.0, ry + h / 2.0 + 10.0)
+            } else if idx < 30 {
+                (rx + w / 2.0, ry + h - 14.0)
+            } else {
+                (rx + 24.0, ry + h / 2.0 + 10.0)
+            };
+            view! {
+                <text
+                    x=ix
+                    y=iy
+                    font-size="26"
+                    font-weight="700"
+                    font-family="'Barlow Condensed', sans-serif"
+                    fill="#d9532f"
+                    stroke="#1c1a18"
+                    stroke-width="0.8"
+                    text-anchor="middle"
+                >
+                    "?"
+                </text>
+            }.into_view()
+        }
+        TileKind::CommunityChest => {
+            let (ix, iy) = if idx < 10 {
+                (rx + w / 2.0, ry + 18.0)
+            } else if idx < 20 {
+                (rx + w - 24.0, ry + h / 2.0)
+            } else if idx < 30 {
+                (rx + w / 2.0, ry + h - 22.0)
+            } else {
+                (rx + 24.0, ry + h / 2.0)
+            };
+            view! {
+                <g transform=format!("translate({:.1}, {:.1})", ix, iy)>
+                    <rect x="-13" y="-9" width="26" height="18" rx="3" fill="#2b7a78" stroke="#1c1a18" stroke-width="1.4" />
+                    <line x1="-13" y1="-2" x2="13" y2="-2" stroke="#1c1a18" stroke-width="1.3" />
+                    <rect x="-3" y="-5" width="6" height="6" rx="1" fill="#f2c94c" stroke="#1c1a18" stroke-width="0.8" />
+                </g>
+            }.into_view()
+        }
+        TileKind::Station(_) => {
+            let (ix, iy) = if idx < 10 {
+                (rx + w / 2.0, ry + 18.0)
+            } else if idx < 20 {
+                (rx + w - 24.0, ry + h / 2.0)
+            } else if idx < 30 {
+                (rx + w / 2.0, ry + h - 20.0)
+            } else {
+                (rx + 24.0, ry + h / 2.0)
+            };
+            view! {
+                <g transform=format!("translate({:.1}, {:.1})", ix, iy)>
+                    <rect x="-14" y="-6" width="24" height="12" rx="2" fill="#23201c" />
+                    <rect x="-10" y="-12" width="10" height="6" rx="1" fill="#23201c" />
+                    <rect x="4" y="-11" width="5" height="5" fill="#23201c" />
+                    <circle cx="-8" cy="8" r="3.5" fill="#d9383a" stroke="#1c1a18" stroke-width="1" />
+                    <circle cx="4" cy="8" r="3.5" fill="#d9383a" stroke="#1c1a18" stroke-width="1" />
+                </g>
+            }.into_view()
+        }
+        TileKind::Utility(_) => {
+            let (ix, iy) = if idx < 10 {
+                (rx + w / 2.0, ry + 18.0)
+            } else if idx < 20 {
+                (rx + w - 24.0, ry + h / 2.0)
+            } else if idx < 30 {
+                (rx + w / 2.0, ry + h - 20.0)
+            } else {
+                (rx + 24.0, ry + h / 2.0)
+            };
+            if idx == 12 {
+                view! {
+                    <g transform=format!("translate({:.1}, {:.1})", ix, iy)>
+                        <circle cx="0" cy="-3" r="8" fill="#f2c94c" stroke="#1c1a18" stroke-width="1.4" />
+                        <rect x="-4" y="5" width="8" height="5" rx="1" fill="#6e6a63" stroke="#1c1a18" stroke-width="1" />
+                    </g>
+                }.into_view()
+            } else {
+                view! {
+                    <g transform=format!("translate({:.1}, {:.1})", ix, iy)>
+                        <path d="M 0 -10 C 6 -2 9 3 9 6 A 9 9 0 1 1 -9 6 C -9 3 -6 -2 0 -10 Z" fill="#4a90b8" stroke="#1c1a18" stroke-width="1.3" />
+                    </g>
+                }.into_view()
+            }
+        }
+        TileKind::Tax(_) => {
+            let (ix, iy) = if idx < 10 {
+                (rx + w / 2.0, ry + 18.0)
+            } else if idx < 20 {
+                (rx + w - 24.0, ry + h / 2.0)
+            } else if idx < 30 {
+                (rx + w / 2.0, ry + h - 20.0)
+            } else {
+                (rx + 24.0, ry + h / 2.0)
+            };
+            view! {
+                <g transform=format!("translate({:.1}, {:.1})", ix, iy)>
+                    <polygon points="0,-10 10,0 0,10 -10,0" fill="#d49b35" stroke="#1c1a18" stroke-width="1.4" />
+                    <circle cx="0" cy="0" r="3" fill="#f5f0e4" />
+                </g>
+            }.into_view()
+        }
+        TileKind::Property(_) => view! {}.into_view(),
+    }
+}
+
+/// Renders an expressive vector character avatar for seat `0..4`, centered at `(0, 0)` within radius `11.5`.
+pub fn render_player_avatar_shapes(seat_idx: usize) -> impl IntoView {
+    let seat = seat_idx % 4;
+    let bg_col = PLAYER_COLORS[seat];
+
+    let character_overlay = match seat {
+        0 => view! {
+            // Seat 0: Classic Saigon Tycoon (Top hat + Gold band + White mustache + Navy suit)
+            <g>
+                <path d="M -7 8.5 Q -6 3.5 0 3.5 Q 6 3.5 7 8.5 Z" fill="#18283a" />
+                <polygon points="-2,4.2 2,4.2 0,8" fill="#fbf7ee" />
+                <circle cx="0" cy="-0.3" r="4.8" fill="#f7d5b5" stroke="#18283a" stroke-width="1" />
+                <circle cx="-1.7" cy="-0.8" r="0.7" fill="#18283a" />
+                <circle cx="1.7" cy="-0.8" r="0.7" fill="#18283a" />
+                <path d="M -2.8 1.5 Q -1.2 0.3 0 1.2 Q 1.2 0.3 2.8 1.5" fill="none" stroke="#fbf7ee" stroke-width="1.3" stroke-linecap="round" />
+                <rect x="-6.5" y="-5.4" width="13" height="1.8" rx="0.8" fill="#18283a" />
+                <rect x="-4.2" y="-10.6" width="8.4" height="5.4" rx="1.2" fill="#18283a" />
+                <rect x="-4.2" y="-6.8" width="8.4" height="1.4" fill="#d4a853" />
+            </g>
+        }.into_view(),
+        1 => view! {
+            // Seat 1: Modern Architect (Sleek hair + Round glasses + Ivory turtleneck)
+            <g>
+                <path d="M -7 8.5 Q -6 3.8 0 3.8 Q 6 3.8 7 8.5 Z" fill="#fbf7ee" stroke="#18283a" stroke-width="0.8" />
+                <circle cx="0" cy="-0.3" r="4.8" fill="#f7d5b5" stroke="#18283a" stroke-width="1" />
+                <path d="M -5 -1.4 Q -4.6 -6.2 0 -6.2 Q 4.6 -6.2 5 -1.4 Q 2 -4.2 -5 -1.4 Z" fill="#2c2420" />
+                <circle cx="-1.8" cy="-0.5" r="1.4" fill="none" stroke="#18283a" stroke-width="0.9" />
+                <circle cx="1.8" cy="-0.5" r="1.4" fill="none" stroke="#18283a" stroke-width="0.9" />
+                <line x1="-0.4" y1="-0.5" x2="0.4" y2="-0.5" stroke="#18283a" stroke-width="0.9" />
+                <path d="M -1.4 2.1 Q 0 3.2 1.4 2.1" fill="none" stroke="#18283a" stroke-width="0.9" stroke-linecap="round" />
+            </g>
+        }.into_view(),
+        2 => view! {
+            // Seat 2: Tech Courier (Helmet/Cap with visor + Cheerful smile)
+            <g>
+                <path d="M -7 8.5 Q -6 3.8 0 3.8 Q 6 3.8 7 8.5 Z" fill="#1b4d38" />
+                <circle cx="0" cy="-0.1" r="4.8" fill="#f3c9a2" stroke="#18283a" stroke-width="1" />
+                <path d="M -5.1 -1.5 Q -4.8 -6.4 0 -6.4 Q 4.8 -6.4 5.1 -1.5 Z" fill="#1f7a53" stroke="#18283a" stroke-width="1" />
+                <rect x="-5.4" y="-2.2" width="10.8" height="1.6" rx="0.8" fill="#fbf7ee" stroke="#18283a" stroke-width="0.8" />
+                <circle cx="-1.6" cy="0.2" r="0.7" fill="#18283a" />
+                <circle cx="1.6" cy="0.2" r="0.7" fill="#18283a" />
+                <path d="M -1.8 2 Q 0 3.4 1.8 2" fill="none" stroke="#18283a" stroke-width="1" stroke-linecap="round" />
+            </g>
+        }.into_view(),
+        _ => view! {
+            // Seat 3: Saigon Merchant (Golden Nón Lá conical hat + Crimson collar)
+            <g>
+                <path d="M -7 8.5 Q -6 3.8 0 3.8 Q 6 3.8 7 8.5 Z" fill="#b82d2f" />
+                <circle cx="0" cy="0.4" r="4.7" fill="#f7d5b5" stroke="#18283a" stroke-width="1" />
+                <circle cx="-1.6" cy="0.2" r="0.7" fill="#18283a" />
+                <circle cx="1.6" cy="0.2" r="0.7" fill="#18283a" />
+                <path d="M -1.5 2.3 Q 0 3.4 1.5 2.3" fill="none" stroke="#18283a" stroke-width="0.9" stroke-linecap="round" />
+                <polygon points="-8.2,-1.6 0,-9.6 8.2,-1.6" fill="#f3d98b" stroke="#8c5f18" stroke-width="1.1" stroke-linejoin="round" />
+                <line x1="-6" y1="-2.2" x2="6" y2="-2.2" stroke="#c89232" stroke-width="0.8" />
+            </g>
+        }.into_view(),
+    };
+
+    view! {
+        <g>
+            <circle cx="0" cy="0" r="11.5" fill=bg_col stroke="#18283a" stroke-width="1.4" />
+            <circle cx="0" cy="0" r="9.6" fill="rgba(255, 255, 255, 0.16)" />
+            {character_overlay}
+        </g>
+    }
+}
+
+/// Standalone SVG avatar badge for UI headers and player cards.
+#[component]
+pub fn PlayerAvatar(seat_idx: usize, #[prop(default = 28)] size: u32) -> impl IntoView {
+    view! {
+        <svg
+            width=size
+            height=size
+            viewBox="-13 -13 26 26"
+            style="display: block; flex-shrink: 0;"
+        >
+            {render_player_avatar_shapes(seat_idx)}
+        </svg>
+    }
+}
+
 #[component]
 pub fn Board(
     state: ReadSignal<GameState>,
@@ -134,119 +494,316 @@ pub fn Board(
     floating_popups: ReadSignal<Vec<BoardFloatingPopup>>,
     drawn_card_banner: ReadSignal<Option<(String, String, String)>>,
     #[prop(default = None)] on_tile_click: Option<Callback<u8>>,
+    #[prop(default = None)] on_roll_dice: Option<Callback<()>>,
 ) -> impl IntoView {
     let board = get_board();
+    let (camera_mode, set_camera_mode) = create_signal(0u8);
 
     view! {
         <div class="board-container">
+            <div class="board-camera-hud">
+                <button
+                    class=move || if camera_mode.get() == 0 { "cam-btn active" } else { "cam-btn" }
+                    on:click=move |_| set_camera_mode.set(0)
+                >
+                    "Góc nhìn 3D"
+                </button>
+                <button
+                    class=move || if camera_mode.get() == 1 { "cam-btn active" } else { "cam-btn" }
+                    on:click=move |_| set_camera_mode.set(1)
+                >
+                    "3D Nghiêng"
+                </button>
+                <button
+                    class=move || if camera_mode.get() == 2 { "cam-btn active" } else { "cam-btn" }
+                    on:click=move |_| set_camera_mode.set(2)
+                >
+                    "2D Phẳng"
+                </button>
+            </div>
+
+            <div class=move || match camera_mode.get() {
+                0 => "board-aspect-frame view-3d-tabletop",
+                1 => "board-aspect-frame view-3d-iso",
+                _ => "board-aspect-frame view-2d-flat",
+            }>
+                // True 3D CSS Cube Dice Overlay aligned to center-board tray
+                {move || {
+                    let (d1, d2) = display_dice.get();
+                    let rolling = is_rolling.get();
+                    let is_doubles = !rolling && d1 == d2;
+                    view! {
+                        <div
+                            class="dice-3d-overlay"
+                            title="Nhấn để lắc xúc xắc"
+                            on:click=move |_| {
+                                if let Some(ref cb) = on_roll_dice {
+                                    cb.call(());
+                                }
+                            }
+                        >
+                            {render_3d_die_cube(d1, rolling, true, is_doubles)}
+                            {render_3d_die_cube(d2, rolling, false, is_doubles)}
+                        </div>
+                    }
+                }}
+
             <svg class="board-svg" viewBox="0 0 1280 960" preserveAspectRatio="xMidYMid meet">
+                <defs>
+                    <linearGradient id="boardCenterGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#e5f4ee" />
+                        <stop offset="55%" stop-color=BOARD_CENTER_BG />
+                        <stop offset="100%" stop-color="#cee6de" />
+                    </linearGradient>
+                    <linearGradient id="goldFrameGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#e6c478" />
+                        <stop offset="50%" stop-color="#d4a853" />
+                        <stop offset="100%" stop-color="#b88b3a" />
+                    </linearGradient>
+                </defs>
+
+                // Outer Prussian Navy frame + Champagne Gold pinstripe
                 <rect x="0" y="0" width="1280" height="960" fill=BOARD_OUTER_BG rx="12" />
+                <rect
+                    x="4"
+                    y="4"
+                    width="1272"
+                    height="952"
+                    rx="10"
+                    fill="none"
+                    stroke="url(#goldFrameGrad)"
+                    stroke-width="2"
+                    opacity="0.72"
+                />
+
+                // Center Well with Mint-Celadon gradient & double Prussian-Gold cartographic border
                 <rect
                     x=CORNER_W
                     y=CORNER_H
                     width=BOARD_WIDTH - 2.0 * CORNER_W
                     height=BOARD_HEIGHT - 2.0 * CORNER_H
-                    fill=BOARD_CENTER_BG
+                    fill="url(#boardCenterGrad)"
                     stroke=BOARD_CENTER_BORDER
+                    stroke-width="2.2"
+                />
+                <rect
+                    x=CORNER_W + 10.0
+                    y=CORNER_H + 10.0
+                    width=BOARD_WIDTH - 2.0 * CORNER_W - 20.0
+                    height=BOARD_HEIGHT - 2.0 * CORNER_H - 20.0
+                    fill="none"
+                    stroke="#b88b3a"
+                    stroke-width="1.2"
+                    opacity="0.55"
+                />
+                <rect
+                    x=CORNER_W + 16.0
+                    y=CORNER_H + 16.0
+                    width=BOARD_WIDTH - 2.0 * CORNER_W - 32.0
+                    height=BOARD_HEIGHT - 2.0 * CORNER_H - 32.0
+                    fill="none"
+                    stroke="rgba(24, 40, 58, 0.22)"
                     stroke-width="1"
-                    rx="8"
+                    stroke-dasharray="6 4"
                 />
 
-                // Center Well Header
+                // Subtle Cartographic Corner Flourishes (4 inner corners of center well)
+                <g fill="#d4a853" stroke="#1b334f" stroke-width="1" opacity="0.78">
+                    <polygon points="154,132 162,124 170,132 162,140" />
+                    <polygon points="1110,132 1118,124 1126,132 1118,140" />
+                    <polygon points="154,828 162,820 170,828 162,836" />
+                    <polygon points="1110,828 1118,820 1126,828 1118,836" />
+                </g>
+
+                // Decorative Compass Medallion & Sunburst Ring behind Skyline
+                <g transform="translate(640, 515)" opacity="0.55">
+                    <circle cx="0" cy="0" r="192" fill="rgba(232, 190, 98, 0.14)" stroke="#d4a853" stroke-width="1.5" stroke-dasharray="5 5" />
+                    <circle cx="0" cy="0" r="168" fill="none" stroke="#1e3654" stroke-width="1" opacity="0.32" />
+                </g>
+
+                // Center Well Iconic Saigon Monopoly Artwork (Skyline + Diagonal Banner + Card Decks)
+                <g transform="translate(640, 525) rotate(-26)" opacity="0.96">
+                    // Saigon Skyline Silhouette in Deep Prussian Navy
+                    <g fill="#1e3654" opacity="0.9">
+                        <rect x="-210" y="-68" width="26" height="34" />
+                        <rect x="-180" y="-84" width="22" height="50" />
+                        <rect x="-152" y="-64" width="44" height="30" />
+                        <rect x="-136" y="-82" width="12" height="18" />
+                        <polygon points="-136,-82 -130,-94 -124,-82" />
+                        <rect x="-102" y="-76" width="28" height="42" />
+                        <rect x="-68" y="-92" width="24" height="58" />
+                        <path d="M -36 -34 L -32 -128 L -10 -122 L -6 -34 Z" />
+                        <rect x="-12" y="-114" width="14" height="4" rx="1" />
+                        <rect x="4" y="-78" width="28" height="44" />
+                        <rect x="38" y="-96" width="24" height="62" />
+                        <rect x="70" y="-118" width="22" height="84" />
+                        <rect x="75" y="-142" width="12" height="24" />
+                        <rect x="79" y="-164" width="4" height="22" />
+                        <rect x="98" y="-82" width="26" height="48" />
+                        <rect x="130" y="-68" width="32" height="34" />
+                        <rect x="168" y="-88" width="24" height="54" />
+                        <rect x="196" y="-62" width="18" height="28" />
+                    </g>
+
+                    // Bold Diagonal Crimson Red Banner with Warm Ivory & Gold Trim
+                    <rect x="-228" y="-32" width="464" height="76" rx="8" fill="#18283a" opacity="0.32" />
+                    <rect x="-234" y="-38" width="464" height="76" rx="8" fill="#d9383a" stroke="#fbf7ee" stroke-width="3" />
+                    <rect x="-228" y="-32" width="452" height="64" rx="5" fill="none" stroke="#e6c478" stroke-width="1.5" opacity="0.72" />
+                    <text
+                        x="-2"
+                        y="16"
+                        font-size="46"
+                        font-weight="700"
+                        fill="#fbf7ee"
+                        text-anchor="middle"
+                        font-family="'Barlow Condensed', sans-serif"
+                        letter-spacing="0.08em"
+                    >
+                        "CỜ TỶ PHÚ"
+                    </text>
+                    <text
+                        x="0"
+                        y="62"
+                        font-size="15"
+                        font-weight="700"
+                        fill="#1e3654"
+                        text-anchor="middle"
+                        font-family="'Barlow Condensed', sans-serif"
+                        letter-spacing="0.22em"
+                    >
+                        "PHIÊN BẢN SÀI GÒN · ĐỊA ỐC ĐÔ THỊ"
+                    </text>
+                </g>
+
+                // Top-Left Card Deck Slot: KHÍ VẬN (3D Stacked Deck)
+                <g transform="translate(302, 266) rotate(-26)">
+                    <rect x="-71" y="-39" width="154" height="94" rx="6" fill="rgba(24, 40, 58, 0.25)" />
+                    <rect x="-74" y="-42" width="154" height="94" rx="6" fill="#d9d0be" stroke="#18283a" stroke-width="1.5" />
+                    <rect x="-76" y="-45" width="154" height="94" rx="6" fill="#e8dfc9" stroke="#18283a" stroke-width="1.5" />
+                    <rect x="-78" y="-48" width="154" height="94" rx="6" fill="#f2c94c" stroke="#18283a" stroke-width="2" />
+                    <rect x="-72" y="-42" width="142" height="82" rx="4" fill="none" stroke="#18283a" stroke-width="1.2" stroke-dasharray="4 3" />
+                    <text
+                        x="0"
+                        y="-10"
+                        font-size="18"
+                        font-weight="700"
+                        fill="#18283a"
+                        text-anchor="middle"
+                        font-family="'Barlow Condensed', sans-serif"
+                        letter-spacing="0.08em"
+                    >
+                        "KHÍ VẬN"
+                    </text>
+                    <rect x="-14" y="2" width="28" height="18" rx="3" fill="#2b7a78" stroke="#18283a" stroke-width="1.5" />
+                    <line x1="-14" y1="9" x2="14" y2="9" stroke="#18283a" stroke-width="1.5" />
+                    <rect x="-3" y="6" width="6" height="6" rx="1" fill="#fbf7ee" />
+                </g>
+
+                // Bottom-Right Card Deck Slot: CƠ HỘI (3D Stacked Deck)
+                <g transform="translate(978, 706) rotate(-26)">
+                    <rect x="-71" y="-39" width="154" height="94" rx="6" fill="rgba(24, 40, 58, 0.25)" />
+                    <rect x="-74" y="-42" width="154" height="94" rx="6" fill="#d9d0be" stroke="#18283a" stroke-width="1.5" />
+                    <rect x="-76" y="-45" width="154" height="94" rx="6" fill="#e8dfc9" stroke="#18283a" stroke-width="1.5" />
+                    <rect x="-78" y="-48" width="154" height="94" rx="6" fill="#e67e35" stroke="#18283a" stroke-width="2" />
+                    <rect x="-72" y="-42" width="142" height="82" rx="4" fill="none" stroke="#18283a" stroke-width="1.2" stroke-dasharray="4 3" />
+                    <text
+                        x="0"
+                        y="-12"
+                        font-size="18"
+                        font-weight="700"
+                        fill="#18283a"
+                        text-anchor="middle"
+                        font-family="'Barlow Condensed', sans-serif"
+                        letter-spacing="0.08em"
+                    >
+                        "CƠ HỘI"
+                    </text>
+                    <text
+                        x="0"
+                        y="26"
+                        font-size="30"
+                        font-weight="700"
+                        fill="#fbf7ee"
+                        stroke="#18283a"
+                        stroke-width="1.2"
+                        text-anchor="middle"
+                        font-family="'Barlow Condensed', sans-serif"
+                    >
+                        "?"
+                    </text>
+                </g>
+
                 <text
                     x="640"
-                    y="196"
-                    font-size="28"
+                    y="812"
+                    font-size="12.5"
                     font-weight="500"
-                    fill=TEXT_PRIMARY
+                    fill="#3b526b"
                     text-anchor="middle"
-                    font-family="'Be Vietnam Pro', sans-serif"
-                    letter-spacing="-0.02em"
-                >
-                    "Cờ tỷ phú Sài Gòn"
-                </text>
-                <text
-                    x="640"
-                    y="220"
-                    font-size="13"
-                    font-weight="400"
-                    fill=TEXT_MUTED
-                    text-anchor="middle"
+                    font-family="'Barlow', sans-serif"
                 >
                     "Chọn ô bất kỳ trên bàn cờ để tra cứu khế ước và biểu phí thuê"
                 </text>
 
-                // Center-board Tactile Ivory SVG Dice Tray
+                // Recessed Prussian Navy Dice Tray (paired with HTML 3D Dice Overlay)
                 {move || {
                     let (d1, d2) = display_dice.get();
                     let rolling = is_rolling.get();
                     let is_doubles = !rolling && d1 == d2;
 
-                    let render_svg_die = |cx: f64, cy: f64, val: u8, cls: &'static str| {
-                        let pips = svg_die_pips_centered(val);
-                        view! {
-                            <g transform=format!("translate({}, {})", cx, cy)>
-                                <g class=cls>
-                                    <rect
-                                        x="-26"
-                                        y="-24"
-                                        width="56"
-                                        height="56"
-                                        rx="10"
-                                        fill="rgba(0,0,0,0.35)"
-                                    />
-                                    <rect
-                                        x="-28"
-                                        y="-28"
-                                        width="56"
-                                        height="56"
-                                        rx="10"
-                                        fill="#efe9de"
-                                        stroke=if is_doubles { STATUS_WARNING } else { "#c7bfb2" }
-                                        stroke-width=if is_doubles { "2" } else { "1" }
-                                    />
-                                    {pips.into_iter().map(|(px, py, is_red)| {
-                                        let fill = if is_red { ACCENT_PRIMARY } else { "#1c1a18" };
-                                        let radius = if is_red && val == 1 { "7" } else { "4.5" };
-                                        view! {
-                                            <circle cx=px * 0.85 cy=py * 0.85 r=radius fill=fill />
-                                        }
-                                    }).collect_view()}
-                                </g>
-                            </g>
-                        }
-                    };
-
-                    let left_cls = if rolling { "svg-die-left-rolling" } else { "svg-die-settled" };
-                    let right_cls = if rolling { "svg-die-right-rolling" } else { "svg-die-settled" };
-
                     view! {
-                        <g>
+                        <g
+                            style="cursor: pointer;"
+                            on:click=move |_| {
+                                if let Some(ref cb) = on_roll_dice {
+                                    cb.call(());
+                                }
+                            }
+                        >
                             <rect
                                 x="536"
-                                y="244"
+                                y="206"
                                 width="208"
-                                height="80"
+                                height="96"
                                 rx="12"
-                                fill=BG_SECONDARY
-                                stroke=BORDER_DEFAULT
+                                fill="#182d46"
+                                stroke=if is_doubles { STATUS_WARNING } else { "#d4a853" }
+                                stroke-width="2"
+                            />
+                            <rect
+                                x="541"
+                                y="211"
+                                width="198"
+                                height="86"
+                                rx="9"
+                                fill="none"
+                                stroke=if is_doubles { "rgba(212, 155, 53, 0.72)" } else { "rgba(230, 196, 120, 0.35)" }
                                 stroke-width="1"
                             />
-                            {render_svg_die(600.0, 284.0, d1, left_cls)}
-                            {render_svg_die(680.0, 284.0, d2, right_cls)}
+                            <rect
+                                x="512"
+                                y="310"
+                                width="256"
+                                height="24"
+                                rx="12"
+                                fill="#182d46"
+                                stroke="rgba(212, 168, 83, 0.4)"
+                                stroke-width="1"
+                                opacity="0.94"
+                            />
                             <text
                                 x="640"
-                                y="344"
-                                font-size="12"
+                                y="326"
+                                font-size="11.5"
                                 font-weight="500"
-                                font-family="'IBM Plex Mono', monospace"
-                                fill=if is_doubles { STATUS_WARNING } else { TEXT_SECONDARY }
+                                font-family="'Roboto Mono', monospace"
+                                fill=if is_doubles { STATUS_WARNING } else { TEXT_PRIMARY }
                                 text-anchor="middle"
                             >
                                 {if rolling {
-                                    "Đang tung xúc xắc".to_string()
+                                    "Đang tung xúc xắc...".to_string()
                                 } else if is_doubles {
-                                    format!("Xúc xắc đôi: {} + {} = {} · Đi thêm lượt", d1, d2, d1 + d2)
+                                    format!("Xúc xắc đôi: {} + {} = {} · Thêm lượt", d1, d2, d1 + d2)
                                 } else {
                                     format!("Kết quả: {} + {} = {}", d1, d2, d1 + d2)
                                 }}
@@ -338,7 +895,7 @@ pub fn Board(
                                 y="30"
                                 font-size="12"
                                 font-weight="400"
-                                font-family="'IBM Plex Mono', monospace"
+                                font-family="'Roboto Mono', monospace"
                                 fill=TEXT_ON_ACCENT
                                 opacity="0.88"
                             >
@@ -349,12 +906,12 @@ pub fn Board(
                                 y="30"
                                 font-size="12"
                                 font-weight="400"
-                                font-family="'IBM Plex Mono', monospace"
+                                font-family="'Roboto Mono', monospace"
                                 fill=TEXT_ON_ACCENT
                                 opacity="0.88"
                                 text-anchor="end"
                             >
-                                "Khế ước địa ốc"
+                                "Nhấn lại ô để đóng · Khế ước"
                             </text>
                             <text
                                 x="24"
@@ -443,7 +1000,7 @@ pub fn Board(
                                         <text x="16" y="48" font-size="13" font-weight="400" fill=TEXT_MUTED>
                                             "Mức phí khi dừng"
                                         </text>
-                                        <text x="528" y="48" font-size="13" font-weight="500" font-family="'IBM Plex Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">
+                                        <text x="528" y="48" font-size="13" font-weight="500" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">
                                             {landing_price_desc}
                                         </text>
                                     </g>
@@ -482,7 +1039,7 @@ pub fn Board(
                                                         y="18"
                                                         font-size="12"
                                                         font-weight="500"
-                                                        font-family="'IBM Plex Mono', monospace"
+                                                        font-family="'Roboto Mono', monospace"
                                                         fill=if active { STATUS_WARNING } else { TEXT_PRIMARY }
                                                         text-anchor="end"
                                                     >
@@ -494,7 +1051,7 @@ pub fn Board(
 
                                         view! {
                                             <g transform="translate(16, 160)">
-                                                <text x="4" y="14" font-size="12" font-weight="400" font-family="'IBM Plex Mono', monospace" fill=TEXT_MUTED>
+                                                <text x="4" y="14" font-size="12" font-weight="400" font-family="'Roboto Mono', monospace" fill=TEXT_MUTED>
                                                     {format!("Giá đất: {}   ·   Xây nhà: {}   ·   Thế chấp: {}", p.cost, p.house_cost, p.mortgage_value)}
                                                 </text>
 
@@ -512,32 +1069,32 @@ pub fn Board(
                                     TileKind::Station(s) => {
                                         view! {
                                             <g transform="translate(16, 160)">
-                                                <text x="4" y="14" font-size="12" font-weight="400" font-family="'IBM Plex Mono', monospace" fill=TEXT_MUTED>
+                                                <text x="4" y="14" font-size="12" font-weight="400" font-family="'Roboto Mono', monospace" fill=TEXT_MUTED>
                                                     {format!("Giá mua bến: {}   ·   Giá trị thế chấp: {}", s.cost, s.mortgage_value)}
                                                 </text>
                                                 <rect x="0" y="24" width="544" height="148" rx="8" fill=BG_SECONDARY stroke=BORDER_DEFAULT stroke-width="1" />
                                                 <text x="16" y="52" font-size="13" fill=TEXT_SECONDARY>"Sở hữu 1 bến xe hoặc nhà ga"</text>
-                                                <text x="528" y="52" font-size="13" font-family="'IBM Plex Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"250.000 đ"</text>
+                                                <text x="528" y="52" font-size="13" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"250.000 đ"</text>
                                                 <text x="16" y="80" font-size="13" fill=TEXT_SECONDARY>"Sở hữu 2 bến xe hoặc nhà ga"</text>
-                                                <text x="528" y="80" font-size="13" font-family="'IBM Plex Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"500.000 đ"</text>
+                                                <text x="528" y="80" font-size="13" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"500.000 đ"</text>
                                                 <text x="16" y="108" font-size="13" fill=TEXT_SECONDARY>"Sở hữu 3 bến xe hoặc nhà ga"</text>
-                                                <text x="528" y="108" font-size="13" font-family="'IBM Plex Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"1.000.000 đ"</text>
+                                                <text x="528" y="108" font-size="13" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"1.000.000 đ"</text>
                                                 <text x="16" y="136" font-size="13" font-weight="500" fill=STATUS_WARNING>"Sở hữu trọn bộ 4 bến xe & nhà ga"</text>
-                                                <text x="528" y="136" font-size="13" font-weight="500" font-family="'IBM Plex Mono', monospace" fill=STATUS_WARNING text-anchor="end">"2.000.000 đ"</text>
+                                                <text x="528" y="136" font-size="13" font-weight="500" font-family="'Roboto Mono', monospace" fill=STATUS_WARNING text-anchor="end">"2.000.000 đ"</text>
                                             </g>
                                         }.into_view()
                                     }
                                     TileKind::Utility(u) => {
                                         view! {
                                             <g transform="translate(16, 160)">
-                                                <text x="4" y="14" font-size="12" font-weight="400" font-family="'IBM Plex Mono', monospace" fill=TEXT_MUTED>
+                                                <text x="4" y="14" font-size="12" font-weight="400" font-family="'Roboto Mono', monospace" fill=TEXT_MUTED>
                                                     {format!("Giá mua công trình: {}   ·   Giá trị thế chấp: {}", u.cost, u.mortgage_value)}
                                                 </text>
                                                 <rect x="0" y="24" width="544" height="108" rx="8" fill=BG_SECONDARY stroke=BORDER_DEFAULT stroke-width="1" />
                                                 <text x="16" y="60" font-size="13" fill=TEXT_SECONDARY>"Sở hữu 1 công trình công cộng"</text>
-                                                <text x="528" y="60" font-size="13" font-family="'IBM Plex Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"4 × xúc xắc × 1.000 đ"</text>
+                                                <text x="528" y="60" font-size="13" font-family="'Roboto Mono', monospace" fill=TEXT_PRIMARY text-anchor="end">"4 × xúc xắc × 1.000 đ"</text>
                                                 <text x="16" y="96" font-size="13" font-weight="500" fill=STATUS_WARNING>"Sở hữu cả 2 công trình công cộng"</text>
-                                                <text x="528" y="96" font-size="13" font-weight="500" font-family="'IBM Plex Mono', monospace" fill=STATUS_WARNING text-anchor="end">"10 × xúc xắc × 1.000 đ"</text>
+                                                <text x="528" y="96" font-size="13" font-weight="500" font-family="'Roboto Mono', monospace" fill=STATUS_WARNING text-anchor="end">"10 × xúc xắc × 1.000 đ"</text>
                                             </g>
                                         }.into_view()
                                     }
@@ -562,28 +1119,26 @@ pub fn Board(
                     let idx = tile.index;
                     let (rx, ry, w, h) = get_tile_rect(idx);
                     let is_corner = idx == 0 || idx == 10 || idx == 20 || idx == 30;
+                    let tile_kind = tile.kind.clone();
 
                     let header_color = match &tile.kind {
                         TileKind::Property(p) => Some(get_district_color(p.district)),
-                        TileKind::Station(_) => Some(TILE_STATION),
-                        TileKind::Utility(_) => Some(TILE_UTILITY),
-                        TileKind::Tax(_) => Some(TILE_TAX),
-                        TileKind::Chance => Some(TILE_CHANCE),
-                        TileKind::CommunityChest => Some(TILE_CHEST),
                         _ => None,
                     };
 
-                    // Content center `(tx, ty)` shifted away from the inner color band
-                    let (tx, ty) = if idx > 0 && idx < 10 {
-                        (rx + w / 2.0, ry + HEADER_THICKNESS + (h - HEADER_THICKNESS) / 2.0)
+                    // Content center `(tx, ty)` shifted away from the inner color band or corner art
+                    let (tx, ty) = if idx == 10 {
+                        (rx + w / 2.0 - 12.0, ry + h - 24.0)
+                    } else if is_corner {
+                        (rx + w / 2.0, ry + h / 2.0 + 6.0)
+                    } else if idx > 0 && idx < 10 {
+                        (rx + w / 2.0, ry + HEADER_THICKNESS + (h - HEADER_THICKNESS) / 2.0 + 4.0)
                     } else if idx > 10 && idx < 20 {
-                        (rx + (w - HEADER_THICKNESS) / 2.0, ry + h / 2.0)
+                        (rx + (w - HEADER_THICKNESS) / 2.0 - 4.0, ry + h / 2.0)
                     } else if idx > 20 && idx < 30 {
-                        (rx + w / 2.0, ry + (h - HEADER_THICKNESS) / 2.0)
-                    } else if idx > 30 && idx < 40 {
-                        (rx + HEADER_THICKNESS + (w - HEADER_THICKNESS) / 2.0, ry + h / 2.0)
+                        (rx + w / 2.0, ry + (h - HEADER_THICKNESS) / 2.0 - 4.0)
                     } else {
-                        (rx + w / 2.0, ry + h / 2.0)
+                        (rx + HEADER_THICKNESS + (w - HEADER_THICKNESS) / 2.0 + 4.0, ry + h / 2.0)
                     };
 
                     let price_text = match &tile.kind {
@@ -618,7 +1173,12 @@ pub fn Board(
                         state.get().properties.get(idx as usize).map(|p| p.is_mortgaged).unwrap_or(false)
                     };
 
-                    let tile_fill = if is_corner { TILE_CORNER_BG } else { TILE_BG };
+                    let tile_fill = match &tile.kind {
+                        TileKind::Chance => TILE_CHANCE_BG,
+                        TileKind::CommunityChest => TILE_CHEST_BG,
+                        _ if is_corner => TILE_CORNER_BG,
+                        _ => TILE_BG,
+                    };
                     let is_selected = move || selected_tile.get() == Some(idx);
                     let is_stepped_on = move || {
                         if let Some(seat) = hopping_seat.get() {
@@ -643,9 +1203,9 @@ pub fn Board(
                                 height=h
                                 fill=move || {
                                     if is_stepped_on() {
-                                        "#2e2b26"
+                                        "#f5e1a4"
                                     } else if is_in_trail() {
-                                        "#25231f"
+                                        "#efe4c6"
                                     } else {
                                         tile_fill
                                     }
@@ -654,14 +1214,14 @@ pub fn Board(
                                     if is_selected() || is_stepped_on() {
                                         TILE_SELECTED_STROKE
                                     } else if is_in_trail() {
-                                        BORDER_SUBTLE
+                                        "#a88b4a"
                                     } else {
                                         TILE_STROKE
                                     }
                                 }
                                 stroke-width=move || {
                                     if is_selected() || is_stepped_on() {
-                                        "2"
+                                        "2.5"
                                     } else {
                                         "1"
                                     }
@@ -678,21 +1238,33 @@ pub fn Board(
                                 } else {
                                     (rx, ry, HEADER_THICKNESS, h)
                                 };
-                                view! { <rect x=hx y=hy width=hw height=hh fill=h_col /> }.into_view()
+                                view! {
+                                    <g>
+                                        <rect x=hx y=hy width=hw height=hh fill=h_col stroke=TILE_STROKE stroke-width="1" />
+                                        <rect x=hx + 1.0 y=hy + 1.0 width=(hw - 2.0).max(1.0) height="3" fill="rgba(255,255,255,0.22)" />
+                                    </g>
+                                }.into_view()
                             } else {
+                                let (inner_fill, inner_stroke, inner_sw) = match &tile_kind {
+                                    TileKind::Chance => (TILE_CHANCE_INNER_BG, TILE_CHANCE_BORDER, "1.4"),
+                                    TileKind::CommunityChest => (TILE_CHEST_INNER_BG, TILE_CHEST_BORDER, "1.4"),
+                                    _ => ("none", TILE_CORNER_ACCENT, "1"),
+                                };
                                 view! {
                                     <rect
                                         x=rx + 4.0
                                         y=ry + 4.0
                                         width=w - 8.0
                                         height=h - 8.0
-                                        fill="none"
-                                        stroke=TILE_CORNER_ACCENT
-                                        stroke-width="1"
+                                        fill=inner_fill
+                                        stroke=inner_stroke
+                                        stroke-width=inner_sw
                                         rx="4"
                                     />
                                 }.into_view()
                             }}
+
+                            {render_tile_illustration(idx, &tile_kind, rx, ry, w, h)}
 
                             {name_lines.into_iter().enumerate().map(|(line_idx, line)| {
                                 let ly = start_y + (line_idx as f64) * line_height;
@@ -701,8 +1273,9 @@ pub fn Board(
                                         x=tx
                                         y=ly
                                         font-size=if is_corner { "11.5" } else { "10.5" }
-                                        font-weight="500"
-                                        fill=TEXT_PRIMARY
+                                        font-weight="600"
+                                        font-family="'Barlow', sans-serif"
+                                        fill=TILE_TEXT_PRIMARY
                                         text-anchor="middle"
                                     >
                                         {line}
@@ -716,9 +1289,9 @@ pub fn Board(
                                         x=tx
                                         y=price_y
                                         font-size="9.5"
-                                        font-weight="400"
-                                        font-family="'IBM Plex Mono', monospace"
-                                        fill=TEXT_MUTED
+                                        font-weight="500"
+                                        font-family="'Roboto Mono', monospace"
+                                        fill=TILE_TEXT_MUTED
                                         text-anchor="middle"
                                     >
                                         {price_text}
@@ -738,13 +1311,13 @@ pub fn Board(
                                     let badge_cls = if just_acquired { "owner-badge-pop" } else { "" };
                                     view! {
                                         <g class=badge_cls>
-                                            <rect x=rx + 4.0 y=ry + 4.0 width="20" height="16" rx="4" fill=col />
+                                            <rect x=rx + 4.0 y=ry + 4.0 width="20" height="16" rx="4" fill=col stroke="#1c1a18" stroke-width="1" />
                                             <text
                                                 x=rx + 14.0
                                                 y=ry + 15.0
                                                 font-size="9.5"
-                                                font-weight="500"
-                                                font-family="'IBM Plex Mono', monospace"
+                                                font-weight="600"
+                                                font-family="'Roboto Mono', monospace"
                                                 fill=TEXT_ON_ACCENT
                                                 text-anchor="middle"
                                             >
@@ -754,17 +1327,17 @@ pub fn Board(
                                     }.into_view()
                                 } else {
                                     view! {}.into_view()
-                                }
+                                 }
                             }}
 
-                            // Architectural Vector Houses / Hotel Silhouette & Mortgage Tag
+                            // 3D Isometric Miniature Houses / Hotel & Mortgage Tag
                             {move || {
                                 let h_cnt = house_count();
                                 let just_built = recent_house_tile.get() == Some(idx);
                                 let build_cls = if just_built { "house-icon-pop" } else { "" };
 
                                 if h_cnt > 0 {
-                                    let label_str = if h_cnt == 5 { "Khách sạn".to_string() } else { format!("{} nhà", h_cnt) };
+                                    let label_str = if h_cnt == 5 { "KS".to_string() } else { format!("×{}", h_cnt) };
                                     let pill_col = if h_cnt == 5 { STATUS_WARNING } else { STATUS_SUCCESS };
                                     view! {
                                         <g class=build_cls>
@@ -772,30 +1345,41 @@ pub fn Board(
                                                 x=tx - 32.0
                                                 y=status_y - 10.0
                                                 width="64"
-                                                height="14"
+                                                height="16"
                                                 rx="4"
-                                                fill=BG_SECONDARY
+                                                fill="#1c1a18"
                                                 stroke=pill_col
                                                 stroke-width="1"
                                             />
-                                            // Vector gabled house/hotel silhouette on left side of badge
-                                            <path
-                                                d=format!(
-                                                    "M {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} Z",
-                                                    tx - 26.0, status_y - 3.0,
-                                                    tx - 22.5, status_y - 6.5,
-                                                    tx - 19.0, status_y - 3.0,
-                                                    tx - 19.0, status_y + 1.0,
-                                                    tx - 26.0, status_y + 1.0
-                                                )
-                                                fill=pill_col
-                                            />
+                                            {if h_cnt == 5 {
+                                                // 3D Isometric Hotel Block
+                                                let hx = tx - 22.0;
+                                                let hy = status_y - 2.0;
+                                                view! {
+                                                    <g>
+                                                        <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx - 5.0, hy - 3.0, hx + 2.0, hy - 3.0, hx + 2.0, hy + 4.0, hx - 5.0, hy + 4.0) fill="#d9383a" />
+                                                        <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx + 2.0, hy - 3.0, hx + 6.0, hy - 5.0, hx + 6.0, hy + 2.0, hx + 2.0, hy + 4.0) fill="#9e2426" />
+                                                        <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx - 5.0, hy - 3.0, hx - 1.0, hy - 5.0, hx + 6.0, hy - 5.0, hx + 2.0, hy - 3.0) fill="#f2c94c" />
+                                                    </g>
+                                                }.into_view()
+                                            } else {
+                                                // 3D Isometric House
+                                                let hx = tx - 21.0;
+                                                let hy = status_y - 1.0;
+                                                view! {
+                                                    <g>
+                                                        <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx - 4.0, hy - 2.0, hx + 1.0, hy - 2.0, hx + 1.0, hy + 3.0, hx - 4.0, hy + 3.0) fill="#3ca370" />
+                                                        <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx + 1.0, hy - 2.0, hx + 4.5, hy - 4.0, hx + 4.5, hy + 1.0, hx + 1.0, hy + 3.0) fill="#28754f" />
+                                                        <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx - 4.5, hy - 2.0, hx - 1.5, hy - 5.5, hx + 1.5, hy - 2.0) fill="#5ce09b" />
+                                                    </g>
+                                                }.into_view()
+                                            }}
                                             <text
-                                                x=tx + 4.0
-                                                y=status_y
-                                                font-size="8.5"
-                                                font-weight="500"
-                                                font-family="'IBM Plex Mono', monospace"
+                                                x=tx + 9.0
+                                                y=status_y + 1.0
+                                                font-size="9"
+                                                font-weight="600"
+                                                font-family="'Roboto Mono', monospace"
                                                 fill=pill_col
                                                 text-anchor="middle"
                                             >
@@ -809,8 +1393,8 @@ pub fn Board(
                                             x=tx
                                             y=status_y
                                             font-size="8.5"
-                                            font-weight="500"
-                                            font-family="'IBM Plex Mono', monospace"
+                                            font-weight="600"
+                                            font-family="'Roboto Mono', monospace"
                                             fill=STATUS_DANGER
                                             text-anchor="middle"
                                         >
@@ -847,7 +1431,7 @@ pub fn Board(
                     }
                 }}
 
-                // Architectural Pawn Tokens (Monogram Medallions T1..T4, zero emoji)
+                // 3D Volumetric Standing Pawn Pieces (Monogram T1..T4)
                 {move || {
                     let st = state.get();
                     let cur_active_id = st.current_player().map(|p| p.id);
@@ -865,7 +1449,6 @@ pub fn Board(
                         let px = cx + offset_x;
                         let py = cy + offset_y;
                         let col = PLAYER_COLORS[p_idx % 4];
-                        let code = PLAYER_AVATARS[p_idx % 4];
                         let is_active = cur_active_id == Some(player.id);
                         let is_hopping = hopping == Some(p_idx);
 
@@ -890,14 +1473,15 @@ pub fn Board(
                                 // Crisp outer ring for active turn player
                                 {if is_active {
                                     view! {
-                                        <circle
+                                        <ellipse
                                             cx="0"
-                                            cy="-2"
-                                            r="17"
+                                            cy="10"
+                                            rx="17"
+                                            ry="7"
                                             fill="none"
-                                            stroke=TEXT_PRIMARY
-                                            stroke-width="1.5"
-                                            opacity="0.85"
+                                            stroke="#d9383a"
+                                            stroke-width="2"
+                                            opacity="0.9"
                                         />
                                     }.into_view()
                                 } else {
@@ -906,33 +1490,25 @@ pub fn Board(
 
                                 <ellipse
                                     class=shadow_class
-                                    cx="0"
+                                    cx="2"
                                     cy="14"
-                                    rx="12"
-                                    ry="4"
+                                    rx="14"
+                                    ry="5"
                                     fill="rgba(0, 0, 0, 0.45)"
                                 />
 
                                 <g class=body_class>
-                                    <circle
-                                        cx="0"
-                                        cy="-2"
-                                        r="13"
-                                        fill=col
-                                        stroke=SURFACE_PANEL
-                                        stroke-width="2"
-                                    />
-                                    <text
-                                        x="0"
-                                        y="2"
-                                        font-size="10.5"
-                                        font-weight="500"
-                                        font-family="'IBM Plex Mono', monospace"
-                                        fill=TEXT_ON_ACCENT
-                                        text-anchor="middle"
-                                    >
-                                        {code}
-                                    </text>
+                                    // 3D Pedestal Rim & Base
+                                    <ellipse cx="0" cy="11" rx="13" ry="5" fill="#1c1a18" />
+                                    <ellipse cx="0" cy="9" rx="12" ry="4.5" fill=col stroke="#1c1a18" stroke-width="1.2" />
+                                    // Tapered 3D Column Body
+                                    <path d="M -11 9 L -8 -5 L 8 -5 L 11 9 Z" fill=col stroke="#1c1a18" stroke-width="1.2" />
+                                    // Left-side Specular Highlight
+                                    <path d="M -8 8 L -6 -4 L -2 -4 L -3 8 Z" fill="rgba(255,255,255,0.24)" />
+                                    // Top 3D Character Avatar Medallion Bust
+                                    <g transform="translate(0, -8) scale(1.1)">
+                                        {render_player_avatar_shapes(p_idx)}
+                                    </g>
                                 </g>
                             </g>
                         }.into_view()
@@ -966,7 +1542,7 @@ pub fn Board(
                                         y="4"
                                         font-size="11.5"
                                         font-weight="500"
-                                        font-family="'IBM Plex Mono', monospace"
+                                        font-family="'Roboto Mono', monospace"
                                         fill=TEXT_PRIMARY
                                         text-anchor="middle"
                                     >
@@ -978,6 +1554,7 @@ pub fn Board(
                     }).collect_view()
                 }}
             </svg>
+            </div>
         </div>
     }
 }
@@ -1031,6 +1608,16 @@ mod tests {
                 assert!(py >= -16.0 && py <= 16.0);
                 assert_eq!(is_red, val == 1 || val == 4);
             }
+        }
+    }
+
+    #[test]
+    fn test_die_3d_settled_transforms_and_pip_masks() {
+        for val in 1..=6u8 {
+            let mask = die_face_pip_mask(val);
+            let pip_count = mask.into_iter().filter(|&b| b).count();
+            assert_eq!(pip_count, val as usize, "Face {val} pip mask count mismatch");
+            assert!(!die_3d_settled_transform(val).is_empty());
         }
     }
 

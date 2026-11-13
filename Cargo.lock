@@ -1140,6 +1140,7 @@ dependencies = [
  "leptos",
  "monopoly-core",
  "monopoly-proto",
+ "rand",
  "serde",
  "serde_json",
  "uuid",
