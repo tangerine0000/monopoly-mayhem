@@ -12,12 +12,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Arc::new(DashMap::new());
     let state = AppState { registry };
 
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8080);
+
     let app = create_router(state);
-    let addr_v4 = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let addr_v4 = SocketAddr::from(([0, 0, 0, 0], port));
     let listener_v4 = TcpListener::bind(addr_v4).await?;
     info!("Monopoly Mayhem server listening on http://{}", addr_v4);
 
-    let addr_v6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
+    let addr_v6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0));
     if let Ok(listener_v6) = TcpListener::bind(addr_v6).await {
         info!("Monopoly Mayhem server also listening on http://{}", addr_v6);
         let app_v6 = app.clone();

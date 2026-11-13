@@ -1,0 +1,8 @@
+target/
+crates/monopoly-client/dist/
+.git/
+.worktrees/
+.env
+*.log
+.idea/
+.vscode/
