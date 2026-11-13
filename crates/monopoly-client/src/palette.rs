@@ -32,15 +32,17 @@ pub const STATUS_WARNING: &str = "#d49b35";
 pub const STATUS_DANGER: &str = "#e5484d";
 
 // ============================================================================
-// Board & Tile Surface Colors
+// Board & Tile Surface Colors (Prussian Blue + Mint Celadon + Warm Ivory)
 // ============================================================================
-pub const BOARD_OUTER_BG: &str = "#1c1a18";
-pub const BOARD_CENTER_BG: &str = "#141311";
-pub const BOARD_CENTER_BORDER: &str = "rgba(239, 233, 222, 0.10)";
-pub const TILE_BG: &str = "#1c1a18";
-pub const TILE_CORNER_BG: &str = "#22201d";
-pub const TILE_SELECTED_STROKE: &str = "#d49b35";
-pub const TILE_STROKE: &str = "rgba(239, 233, 222, 0.10)";
+pub const BOARD_OUTER_BG: &str = "#1b334f";
+pub const BOARD_CENTER_BG: &str = "#dcefe8";
+pub const BOARD_CENTER_BORDER: &str = "#21354d";
+pub const TILE_BG: &str = "#fbf7ee";
+pub const TILE_CORNER_BG: &str = "#f2ebdc";
+pub const TILE_SELECTED_STROKE: &str = "#d9383a";
+pub const TILE_STROKE: &str = "#21354d";
+pub const TILE_TEXT_PRIMARY: &str = "#18283a";
+pub const TILE_TEXT_MUTED: &str = "#4a5d73";
 
 // ============================================================================
 // Special Tile Accent Colors
@@ -49,8 +51,14 @@ pub const TILE_STATION: &str = "#6e6a63";
 pub const TILE_UTILITY: &str = "#5b7a8c";
 pub const TILE_TAX: &str = "#b8474b";
 pub const TILE_CHANCE: &str = "#c46b45";
+pub const TILE_CHANCE_BG: &str = "#fbd7b5";
+pub const TILE_CHANCE_INNER_BG: &str = "#f6c18e";
+pub const TILE_CHANCE_BORDER: &str = "#c85a28";
 pub const TILE_CHEST: &str = "#498774";
-pub const TILE_CORNER_ACCENT: &str = "rgba(239, 233, 222, 0.12)";
+pub const TILE_CHEST_BG: &str = "#faecb8";
+pub const TILE_CHEST_INNER_BG: &str = "#f4dd88";
+pub const TILE_CHEST_BORDER: &str = "#b5851d";
+pub const TILE_CORNER_ACCENT: &str = "rgba(28, 26, 24, 0.16)";
 
 // ============================================================================
 // Player Token & Character Palette (Monogram Codes, Zero Emoji)

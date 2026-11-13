@@ -1,10 +1,12 @@
 use crate::room::{RoomActor, RoomCommand};
 use axum::{
+    body::Body,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query, State,
+        Query, Request, State,
     },
-    http::StatusCode,
+    http::{header, HeaderValue, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -40,12 +42,26 @@ pub struct WsQuery {
     pub room: Option<String>,
 }
 
+async fn no_cache_html(req: Request<Body>, next: Next) -> Response {
+    let mut res = next.run(req).await;
+    if let Some(ct) = res.headers().get(header::CONTENT_TYPE) {
+        if ct.to_str().unwrap_or("").contains("text/html") {
+            res.headers_mut().insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store, must-revalidate"),
+            );
+        }
+    }
+    res
+}
+
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/api/rooms", post(create_room))
         .route("/ws", get(ws_upgrade))
         .fallback_service(ServeDir::new("crates/monopoly-client/dist"))
+        .layer(middleware::from_fn(no_cache_html))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

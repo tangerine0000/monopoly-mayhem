@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::palette::{
     get_district_color, get_district_label, BG_SECONDARY, BORDER_DEFAULT, BORDER_SUBTLE,
     PLAYER_AVATARS, PLAYER_COLORS, STATUS_DANGER, STATUS_SUCCESS, SURFACE_HOVER, TEXT_MUTED,
