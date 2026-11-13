@@ -34,3 +34,17 @@ cd crates/monopoly-client && trunk build --release
 # Run entire workspace tests
 cargo test --workspace
 ```
+
+## Running Locally
+
+Start the server and client in two separate terminals:
+
+```bash
+# Terminal 1: Start the authoritative game server
+cargo run -p monopoly-server
+```
+
+```bash
+# Terminal 2: Start the Leptos WASM client dev server
+cd crates/monopoly-client && trunk serve
+```
