@@ -18,7 +18,7 @@ pub enum RoomCommand {
     ConnectClient {
         player_name: String,
         session_token: Option<SessionToken>,
-        tx: mpsc::Sender<ServerMessage>,
+        tx: mpsc::Sender<Arc<String>>,
         reply: oneshot::Sender<Result<(PlayerId, SessionToken, u8), String>>,
     },
     DisconnectClient(PlayerId),
@@ -38,7 +38,7 @@ const MAX_BOT_STEPS: usize = 60;
 pub struct RoomActor {
     room_id: RoomId,
     state: GameState,
-    clients: HashMap<PlayerId, mpsc::Sender<ServerMessage>>,
+    clients: HashMap<PlayerId, mpsc::Sender<Arc<String>>>,
     sessions: HashMap<SessionToken, PlayerId>,
     rng: ChaCha8Rng,
     turn_timer_handle: Option<tokio::task::JoinHandle<()>>,
@@ -142,7 +142,7 @@ impl RoomActor {
         &mut self,
         player_name: String,
         session_token: Option<SessionToken>,
-        tx: mpsc::Sender<ServerMessage>,
+        tx: mpsc::Sender<Arc<String>>,
         reply: oneshot::Sender<Result<(PlayerId, SessionToken, u8), String>>,
     ) {
         // Cancel empty room cleanup if active
@@ -166,20 +166,22 @@ impl RoomActor {
                     let _ = reply.send(Ok((p_id, tok.clone(), seat)));
 
                     // Send RoomJoined & SyncSnapshot to reconnecting player
-                    let _ = tx
-                        .send(ServerMessage::RoomJoined {
+                    Self::send_to_client(
+                        &tx,
+                        &ServerMessage::RoomJoined {
                             room_id: self.room_id.clone(),
                             player_id: p_id,
                             session_token: tok.clone(),
                             seat_index: seat,
-                        })
-                        .await;
+                        },
+                    );
 
-                    let _ = tx
-                        .send(ServerMessage::SyncSnapshot {
+                    Self::send_to_client(
+                        &tx,
+                        &ServerMessage::SyncSnapshot {
                             state: serde_json::to_value(&self.state).unwrap_or_default(),
-                        })
-                        .await;
+                        },
+                    );
 
                     self.broadcast(ServerMessage::PlayerReconnected { player_id: p_id })
                         .await;
@@ -211,22 +213,23 @@ impl RoomActor {
 
         let _ = reply.send(Ok((p_id, tok.clone(), seat)));
 
-        let _ = tx
-            .send(ServerMessage::RoomJoined {
+        Self::send_to_client(
+            &tx,
+            &ServerMessage::RoomJoined {
                 room_id: self.room_id.clone(),
                 player_id: p_id,
                 session_token: tok,
                 seat_index: seat,
-            })
-            .await;
-
-        self.broadcast(ServerMessage::SyncSnapshot {
-            state: serde_json::to_value(&self.state).unwrap_or_default(),
-        })
-        .await;
+            },
+        );
 
         if self.state.players.len() >= max_players {
             self.start_game().await;
+        } else {
+            self.broadcast(ServerMessage::SyncSnapshot {
+                state: serde_json::to_value(&self.state).unwrap_or_default(),
+            })
+            .await;
         }
     }
 
@@ -378,22 +381,24 @@ impl RoomActor {
                 ClientMessage::AddBot => {
                     if !is_host {
                         if let Some(tx) = self.clients.get(&player_id) {
-                            let _ = tx
-                                .send(ServerMessage::ActionRejected {
+                            Self::send_to_client(
+                                tx,
+                                &ServerMessage::ActionRejected {
                                     reason: "Chỉ chủ phòng mới có thể thêm máy AI".to_string(),
-                                })
-                                .await;
+                                },
+                            );
                         }
                         return false;
                     }
                     let max_players = self.state.config.max_players.clamp(2, 4) as usize;
                     if self.state.players.len() >= max_players {
                         if let Some(tx) = self.clients.get(&player_id) {
-                            let _ = tx
-                                .send(ServerMessage::ActionRejected {
+                            Self::send_to_client(
+                                tx,
+                                &ServerMessage::ActionRejected {
                                     reason: format!("Phòng đã đủ {} người chơi", max_players),
-                                })
-                                .await;
+                                },
+                            );
                         }
                         return false;
                     }
@@ -423,21 +428,23 @@ impl RoomActor {
                 ClientMessage::StartGame => {
                     if !is_host {
                         if let Some(tx) = self.clients.get(&player_id) {
-                            let _ = tx
-                                .send(ServerMessage::ActionRejected {
+                            Self::send_to_client(
+                                tx,
+                                &ServerMessage::ActionRejected {
                                     reason: "Chỉ chủ phòng mới có thể bắt đầu ván đấu".to_string(),
-                                })
-                                .await;
+                                },
+                            );
                         }
                         return false;
                     }
                     if self.state.players.len() < 2 {
                         if let Some(tx) = self.clients.get(&player_id) {
-                            let _ = tx
-                                .send(ServerMessage::ActionRejected {
+                            Self::send_to_client(
+                                tx,
+                                &ServerMessage::ActionRejected {
                                     reason: "Cần ít nhất 2 người chơi để bắt đầu".to_string(),
-                                })
-                                .await;
+                                },
+                            );
                         }
                         return false;
                     }
@@ -445,11 +452,12 @@ impl RoomActor {
                 }
                 _ => {
                     if let Some(tx) = self.clients.get(&player_id) {
-                        let _ = tx
-                            .send(ServerMessage::ActionRejected {
+                        Self::send_to_client(
+                            tx,
+                            &ServerMessage::ActionRejected {
                                 reason: "Ván đấu chưa bắt đầu".to_string(),
-                            })
-                            .await;
+                            },
+                        );
                     }
                 }
             }
@@ -511,11 +519,12 @@ impl RoomActor {
             Err(e) => {
                 warn!("Action rejected for {}: {}", player_id, e);
                 if let Some(tx) = self.clients.get(&player_id) {
-                    let _ = tx
-                        .send(ServerMessage::ActionRejected {
+                    Self::send_to_client(
+                        tx,
+                        &ServerMessage::ActionRejected {
                             reason: e.to_string(),
-                        })
-                        .await;
+                        },
+                    );
                 }
                 false
             }
@@ -654,9 +663,18 @@ impl RoomActor {
         }
     }
 
+    fn send_to_client(tx: &mpsc::Sender<Arc<String>>, msg: &ServerMessage) {
+        if let Ok(json) = serde_json::to_string(msg) {
+            let _ = tx.try_send(Arc::new(json));
+        }
+    }
+
     async fn broadcast(&self, msg: ServerMessage) {
-        for tx in self.clients.values() {
-            let _ = tx.send(msg.clone()).await;
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let payload = Arc::new(json);
+            for tx in self.clients.values() {
+                let _ = tx.try_send(payload.clone());
+            }
         }
     }
 }
