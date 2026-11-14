@@ -155,7 +155,7 @@ async fn handle_socket(socket: WebSocket, room_tx: mpsc::Sender<RoomCommand>) {
         Ok(Err(err_msg)) => {
             let rej = ServerMessage::ActionRejected { reason: err_msg };
             if let Ok(json) = serde_json::to_string(&rej) {
-                let _ = ws_sink.send(Message::Text(json)).await;
+                let _ = ws_sink.send(Message::Text(json.into())).await;
             }
             return;
         }
@@ -167,7 +167,7 @@ async fn handle_socket(socket: WebSocket, room_tx: mpsc::Sender<RoomCommand>) {
     // 2. Spawn pump from pre-serialized message channel to WebSocket Sink
     let mut send_task = tokio::spawn(async move {
         while let Some(json) = client_rx.recv().await {
-            if ws_sink.send(Message::Text((*json).clone())).await.is_err() {
+            if ws_sink.send(Message::Text((*json).clone().into())).await.is_err() {
                 break;
             }
         }
