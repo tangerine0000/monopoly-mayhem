@@ -6,7 +6,7 @@ use crate::palette::{
     TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TILE_CHANCE, TILE_CHEST, TILE_STATION, TILE_TAX,
     TILE_UTILITY,
 };
-use leptos::*;
+use leptos::prelude::*;
 use monopoly_core::board::{get_board, TileKind};
 use monopoly_core::money::Money as CoreMoney;
 use monopoly_core::state::{GameState, TurnPhase};
@@ -132,9 +132,9 @@ pub fn Controls(
                                             <span class="mono" style=format!("font-size: 11px; color: {};", TEXT_MUTED)>
                                                 "Bạn"
                                             </span>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        view! {}.into_view()
+                                        ().into_any()
                                     }}
                                 </div>
 
@@ -146,12 +146,12 @@ pub fn Controls(
                                                 <span class="ui-cash-delta mono" style=format!("font-size: 11px; font-weight: 500; color: {};", d_col)>
                                                     {delta_str.clone()}
                                                 </span>
-                                            }.into_view()
+                                            }.into_any()
                                         } else {
-                                            view! {}.into_view()
+                                            ().into_any()
                                         }
                                     } else {
-                                        view! {}.into_view()
+                                        ().into_any()
                                     }}
                                     <span
                                         class="mono"
@@ -214,7 +214,7 @@ pub fn Controls(
                                     {move || if is_rolling.get() { "Đang tung xúc xắc" } else { "Đang di chuyển trên bàn cờ" }}
                                 </button>
                             </div>
-                        }.into_view();
+                        }.into_any();
                     }
 
                     match st.turn_phase {
@@ -227,7 +227,7 @@ pub fn Controls(
                                     <button
                                         class="btn"
                                         disabled=move || !my_turn || is_rolling.get()
-                                        on:click=move |_| on_action.call(ClientMessage::RollDice)
+                                        on:click=move |_| on_action.run(ClientMessage::RollDice)
                                     >
                                         "Lắc xúc xắc"
                                     </button>
@@ -238,7 +238,7 @@ pub fn Controls(
                                                     class="btn btn-secondary"
                                                     style="flex: 1;"
                                                     disabled=!my_turn
-                                                    on:click=move |_| on_action.call(ClientMessage::PayJailBail)
+                                                    on:click=move |_| on_action.run(ClientMessage::PayJailBail)
                                                 >
                                                     "Nộp phạt 500.000 đ"
                                                 </button>
@@ -248,21 +248,21 @@ pub fn Controls(
                                                             class="btn btn-secondary"
                                                             style="flex: 1;"
                                                             disabled=!my_turn
-                                                            on:click=move |_| on_action.call(ClientMessage::UseJailCard)
+                                                            on:click=move |_| on_action.run(ClientMessage::UseJailCard)
                                                         >
                                                             "Dùng thẻ ra tù"
                                                         </button>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    view! {}.into_view()
+                                                    ().into_any()
                                                 }}
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        view! {}.into_view()
+                                        ().into_any()
                                     }}
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         }
                         TurnPhase::TileActionPending => {
                             let auction_enabled = st.config.enable_auction;
@@ -277,7 +277,7 @@ pub fn Controls(
                                         class="btn"
                                         style="flex: 1;"
                                         disabled=!my_turn
-                                        on:click=move |_| on_action.call(ClientMessage::BuyProperty)
+                                        on:click=move |_| on_action.run(ClientMessage::BuyProperty)
                                     >
                                         "Mua bất động sản"
                                     </button>
@@ -285,12 +285,12 @@ pub fn Controls(
                                         class="btn btn-outline"
                                         style="flex: 1;"
                                         disabled=!my_turn
-                                        on:click=move |_| on_action.call(ClientMessage::DeclineProperty)
+                                        on:click=move |_| on_action.run(ClientMessage::DeclineProperty)
                                     >
                                         {decline_label}
                                     </button>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         }
                         TurnPhase::Auction => {
                             let cur_bid = st.auction.as_ref().map(|a| a.current_bid).unwrap_or(Money::ZERO);
@@ -300,19 +300,19 @@ pub fn Controls(
                                     <button
                                         class="btn"
                                         style="flex: 1;"
-                                        on:click=move |_| on_action.call(ClientMessage::PlaceBid { amount: next_bid })
+                                        on:click=move |_| on_action.run(ClientMessage::PlaceBid { amount: next_bid })
                                     >
                                         "Trả giá +50.000 đ"
                                     </button>
                                     <button
                                         class="btn btn-outline"
                                         style="flex: 1;"
-                                        on:click=move |_| on_action.call(ClientMessage::PassAuction)
+                                        on:click=move |_| on_action.run(ClientMessage::PassAuction)
                                     >
                                         "Bỏ đấu giá"
                                     </button>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         }
                         TurnPhase::TurnEnded => {
                             view! {
@@ -320,12 +320,12 @@ pub fn Controls(
                                     <button
                                         class="btn"
                                         disabled=!my_turn
-                                        on:click=move |_| on_action.call(ClientMessage::EndTurn)
+                                        on:click=move |_| on_action.run(ClientMessage::EndTurn)
                                     >
                                         "Kết thúc lượt"
                                     </button>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         }
                     }
                 }}
@@ -438,46 +438,46 @@ pub fn Controls(
                                                 <button
                                                     class="btn btn-outline"
                                                     style="min-height: 36px; font-size: 13px; padding: 4px 12px;"
-                                                    on:click=move |_| on_action.call(ClientMessage::BuildHouse { tile_index: t_idx })
+                                                    on:click=move |_| on_action.run(ClientMessage::BuildHouse { tile_index: t_idx })
                                                 >
                                                     "Xây nhà"
                                                 </button>
                                                 <button
                                                     class="btn btn-outline"
                                                     style="min-height: 36px; font-size: 13px; padding: 4px 12px;"
-                                                    on:click=move |_| on_action.call(ClientMessage::SellHouse { tile_index: t_idx })
+                                                    on:click=move |_| on_action.run(ClientMessage::SellHouse { tile_index: t_idx })
                                                 >
                                                     "Bán nhà"
                                                 </button>
-                                            }.into_view()
+                                            }.into_any()
                                         } else {
-                                            view! {}.into_view()
+                                            ().into_any()
                                         }}
                                         <button
                                             class="btn btn-outline"
                                             style="min-height: 36px; font-size: 13px; padding: 4px 12px;"
-                                            on:click=move |_| on_action.call(ClientMessage::MortgageProperty { tile_index: t_idx })
+                                            on:click=move |_| on_action.run(ClientMessage::MortgageProperty { tile_index: t_idx })
                                         >
                                             "Thế chấp"
                                         </button>
                                         <button
                                             class="btn btn-outline"
                                             style="min-height: 36px; font-size: 13px; padding: 4px 12px;"
-                                            on:click=move |_| on_action.call(ClientMessage::UnmortgageProperty { tile_index: t_idx })
+                                            on:click=move |_| on_action.run(ClientMessage::UnmortgageProperty { tile_index: t_idx })
                                         >
                                             "Chuộc lại"
                                         </button>
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             } else {
                                 view! {
                                     <span style=format!("color: {}; font-size: 12px; line-height: 16px;", TEXT_MUTED)>
                                         "Chọn một ô bất động sản trên bàn cờ để xây nhà hoặc thế chấp"
                                     </span>
-                                }.into_view()
+                                }.into_any()
                             }}
                         </div>
-                    }.into_view()
+                    }.into_any()
                 } else {
                     view! {
                         <div style=format!(
@@ -486,7 +486,7 @@ pub fn Controls(
                         )>
                             "Chọn một ô đất trên bàn cờ để tra cứu chủ sở hữu và biểu phí thuê"
                         </div>
-                    }.into_view()
+                    }.into_any()
                 }
             }}
         </div>

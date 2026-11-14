@@ -2,7 +2,7 @@ use crate::palette::{
     BG_SECONDARY, BORDER_DEFAULT, BORDER_SUBTLE, SURFACE_HOVER, TEXT_MUTED, TEXT_PRIMARY,
     TEXT_SECONDARY,
 };
-use leptos::*;
+use leptos::prelude::*;
 
 #[component]
 pub fn LogFeed(logs: ReadSignal<Vec<String>>) -> impl IntoView {
@@ -31,7 +31,7 @@ pub fn LogFeed(logs: ReadSignal<Vec<String>>) -> impl IntoView {
                             <span style=format!("color: {};", TEXT_MUTED)>
                                 "Chưa có sự kiện nào"
                             </span>
-                        }.into_view()
+                        }.into_any()
                     } else {
                         items.into_iter().rev().enumerate().map(|(rev_idx, line)| {
                             let is_newest = rev_idx == 0;
@@ -54,7 +54,7 @@ pub fn LogFeed(logs: ReadSignal<Vec<String>>) -> impl IntoView {
                                     <span>{line}</span>
                                 </div>
                             }
-                        }).collect_view().into_view()
+                        }).collect_view().into_any()
                     }
                 }}
             </div>
