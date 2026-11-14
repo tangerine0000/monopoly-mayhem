@@ -156,8 +156,13 @@
         }
 
         .btn-roll-dice:disabled {
-            opacity: 0.5;
+            background: #4a4742;
+            border-color: rgba(255, 255, 255, 0.14);
+            color: #9e988e;
+            box-shadow: none;
+            opacity: 0.7;
             cursor: not-allowed;
+            transform: none;
         }
 
         .btn-hud-pill {
@@ -198,6 +203,18 @@
 
         .btn-hud-secondary:hover:not(:disabled) {
             background: #33302c;
+        }
+
+        .btn-hud-pill:disabled,
+        .btn-hud-buy:disabled,
+        .btn-hud-secondary:disabled {
+            background: #4a4742 !important;
+            color: #9e988e !important;
+            border: 1px solid rgba(255, 255, 255, 0.14) !important;
+            box-shadow: none !important;
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
         }
 
         /* Toggleable History Popover Drawer */
@@ -383,7 +400,11 @@
         }
 
         .btn:disabled {
-            opacity: 0.4;
+            background-color: #4a4742 !important;
+            color: #9e988e !important;
+            border-color: rgba(255, 255, 255, 0.14) !important;
+            box-shadow: none !important;
+            opacity: 0.7;
             cursor: not-allowed;
             transform: none;
         }
@@ -1640,6 +1661,20 @@
         :root[data-template="gachbong"] .board-camera-hud {
             background: rgba(244, 234, 214, 0.92);
             border-color: #d2bf9b;
+        }
+
+        :root[data-template="gachbong"] .btn-roll-dice:disabled,
+        :root[data-template="gachbong"] .btn-hud-pill:disabled,
+        :root[data-template="gachbong"] .btn-hud-buy:disabled,
+        :root[data-template="gachbong"] .btn-hud-secondary:disabled,
+        :root[data-template="gachbong"] .btn:disabled {
+            background: #c7c0b4 !important;
+            color: #756e63 !important;
+            border: 1px solid #b3ab9e !important;
+            box-shadow: none !important;
+            opacity: 0.75;
+            cursor: not-allowed;
+            transform: none;
         }
     </style>
 </head>

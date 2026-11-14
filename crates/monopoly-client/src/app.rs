@@ -1634,6 +1634,7 @@ pub fn App() -> impl IntoView {
                                                             <button
                                                                 class="btn"
                                                                 style="flex: 1;"
+                                                                disabled=move || player_name.get().trim().is_empty() || room_id.get().trim().is_empty()
                                                                 on:click=move |_| {
                                                                     let bots = if online_add_bots.get() { online_bot_count.get() } else { 0 };
                                                                     connect_to_room(
@@ -1650,6 +1651,7 @@ pub fn App() -> impl IntoView {
                                                             <button
                                                                 class="btn btn-secondary"
                                                                 style="flex: 1;"
+                                                                disabled=move || player_name.get().trim().is_empty()
                                                                 on:click=move |_| {
                                                                     let p_name = player_name.get();
                                                                     let auction_opt = enable_auction_config.get();
@@ -2067,7 +2069,9 @@ pub fn App() -> impl IntoView {
                                             if let (Some(me), Some(auc)) = (me_opt, st.auction.as_ref()) {
                                                 let next_bid = auc.current_bid + Money::from_vnd(50_000);
                                                 let is_active = auc.active_bidders.contains(&me.id);
-                                                let can_bid = is_active && me.cash >= next_bid;
+                                                let is_leading = auc.highest_bidder == Some(me.id);
+                                                let can_bid = is_active && !is_leading && me.cash >= next_bid;
+                                                let can_pass = is_active && !is_leading;
                                                 if is_active {
                                                     if local_mode {
                                                         let bidder_name = me.name.clone();
@@ -2087,6 +2091,7 @@ pub fn App() -> impl IntoView {
                                                         </button>
                                                         <button
                                                             class="btn-hud-pill btn-hud-secondary"
+                                                            disabled=move || !can_pass
                                                             on:click=move |_| handle_action.run(ClientMessage::PassAuction)
                                                         >
                                                             "Bỏ đấu giá"

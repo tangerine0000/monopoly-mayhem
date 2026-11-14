@@ -622,6 +622,9 @@ pub fn Board(
                                 let is_active_bidder = me_opt
                                     .map(|me| auc.active_bidders.contains(&me.id))
                                     .unwrap_or(false);
+                                let is_leading = me_opt
+                                    .map(|me| auc.highest_bidder == Some(me.id))
+                                    .unwrap_or(false);
                                 let my_cash = me_opt.map(|me| me.cash).unwrap_or(Money::ZERO);
                                 let bid_50 = auc.current_bid + Money::from_vnd(50_000);
                                 let bid_100 = auc.current_bid + Money::from_vnd(100_000);
@@ -676,7 +679,7 @@ pub fn Board(
                                                         <button
                                                             class="btn-hud-pill btn-hud-buy"
                                                             style="height: 34px; padding: 0 11px; font-size: 12px;"
-                                                            disabled=move || my_cash < bid_50
+                                                            disabled=move || busy || is_leading || my_cash < bid_50
                                                             on:click=move |_| {
                                                                 if let Some(cb) = on_act_50 {
                                                                     cb.run(ClientMessage::PlaceBid { amount: bid_50 });
@@ -688,7 +691,7 @@ pub fn Board(
                                                         <button
                                                             class="btn-hud-pill btn-hud-buy"
                                                             style="height: 34px; padding: 0 11px; font-size: 12px;"
-                                                            disabled=move || my_cash < bid_100
+                                                            disabled=move || busy || is_leading || my_cash < bid_100
                                                             on:click=move |_| {
                                                                 if let Some(cb) = on_act_100 {
                                                                     cb.run(ClientMessage::PlaceBid { amount: bid_100 });
@@ -700,7 +703,7 @@ pub fn Board(
                                                         <button
                                                             class="btn-hud-pill btn-hud-buy"
                                                             style="height: 34px; padding: 0 11px; font-size: 12px;"
-                                                            disabled=move || my_cash < bid_500
+                                                            disabled=move || busy || is_leading || my_cash < bid_500
                                                             on:click=move |_| {
                                                                 if let Some(cb) = on_act_500 {
                                                                     cb.run(ClientMessage::PlaceBid { amount: bid_500 });
@@ -712,6 +715,7 @@ pub fn Board(
                                                         <button
                                                             class="btn-hud-pill btn-hud-secondary"
                                                             style="height: 34px; padding: 0 11px; font-size: 12px;"
+                                                            disabled=move || busy || is_leading
                                                             on:click=move |_| {
                                                                 if let Some(cb) = on_act_pass {
                                                                     cb.run(ClientMessage::PassAuction);
@@ -836,7 +840,7 @@ pub fn Board(
                                                     <button
                                                         class="btn-hud-pill btn-hud-buy"
                                                         style="flex: 1; height: 36px;"
-                                                        disabled=move || !can_buy
+                                                        disabled=move || busy || !can_buy
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_buy {
                                                                 cb.run(ClientMessage::BuyProperty);
@@ -848,6 +852,7 @@ pub fn Board(
                                                     <button
                                                         class="btn-hud-pill btn-hud-secondary"
                                                         style="height: 36px;"
+                                                        disabled=move || busy
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_decline {
                                                                 cb.run(ClientMessage::DeclineProperty);
@@ -1097,13 +1102,24 @@ pub fn Board(
                     let (d1, d2) = display_dice.get();
                     let rolling = is_rolling.get();
                     let is_doubles = !rolling && d1 == d2;
+                    let can_roll_tray = state.with(|st| {
+                        let my_id = my_player_id.get();
+                        st.is_game_started
+                            && !st.is_game_over
+                            && my_id.is_some()
+                            && st.current_player().map(|p| p.id) == my_id
+                            && st.turn_phase == TurnPhase::WaitingForRoll
+                    }) && !rolling
+                        && !is_animating_move.get();
 
                     view! {
                         <g
-                            style="cursor: pointer;"
+                            style=if can_roll_tray { "cursor: pointer;" } else { "cursor: default;" }
                             on:click=move |_| {
-                                if let Some(ref cb) = on_roll_dice {
-                                    cb.run(());
+                                if can_roll_tray {
+                                    if let Some(ref cb) = on_roll_dice {
+                                        cb.run(());
+                                    }
                                 }
                             }
                         >
@@ -1892,6 +1908,7 @@ pub fn Board(
                 let is_my_turn = my_id.is_some() && st.current_player().map(|p| p.id) == my_id;
                 let is_owned_by_me = my_id.is_some() && prop_state.owner == my_id;
 
+                let busy = is_rolling.get() || is_animating_move.get();
                 let owner_actions_view = if st.is_game_started && !st.is_game_over && is_owned_by_me {
                     if let Some(me) = my_id.and_then(|id| st.find_player(id)) {
                         match &tile.kind {
@@ -1903,16 +1920,17 @@ pub fn Board(
                                 let max_h = d_tiles.iter().map(|&t| st.properties[t as usize].house_count).max().unwrap_or(0);
                                 let h_cnt = prop_state.house_count;
 
-                                let can_build = is_my_turn
+                                let can_build = !busy
+                                    && is_my_turn
                                     && full_set
                                     && !any_mortgaged
                                     && h_cnt < 5
                                     && h_cnt == min_h
                                     && me.cash >= p.house_cost;
-                                let can_sell = is_my_turn && h_cnt > 0 && h_cnt == max_h;
-                                let can_mortgage = is_my_turn && !prop_state.is_mortgaged && max_h == 0;
+                                let can_sell = !busy && is_my_turn && h_cnt > 0 && h_cnt == max_h;
+                                let can_mortgage = !busy && is_my_turn && !prop_state.is_mortgaged && max_h == 0;
                                 let unmortgage_cost = Money((p.mortgage_value.0 * 11) / 10);
-                                let can_unmortgage = is_my_turn && prop_state.is_mortgaged && me.cash >= unmortgage_cost;
+                                let can_unmortgage = !busy && is_my_turn && prop_state.is_mortgaged && me.cash >= unmortgage_cost;
 
                                 let hint = if !is_my_turn {
                                     Some("Chỉ thao tác được trong lượt của bạn".to_string())
@@ -2010,8 +2028,8 @@ pub fn Board(
                             TileKind::Station(s) => {
                                 let m_val = s.mortgage_value;
                                 let unm_cost = Money((m_val.0 * 11) / 10);
-                                let can_m = is_my_turn && !prop_state.is_mortgaged;
-                                let can_u = is_my_turn && prop_state.is_mortgaged && me.cash >= unm_cost;
+                                let can_m = !busy && is_my_turn && !prop_state.is_mortgaged;
+                                let can_u = !busy && is_my_turn && prop_state.is_mortgaged && me.cash >= unm_cost;
                                 let on_m = on_action;
                                 let on_u = on_action;
                                 view! {
@@ -2055,8 +2073,8 @@ pub fn Board(
                             TileKind::Utility(u) => {
                                 let m_val = u.mortgage_value;
                                 let unm_cost = Money((m_val.0 * 11) / 10);
-                                let can_m = is_my_turn && !prop_state.is_mortgaged;
-                                let can_u = is_my_turn && prop_state.is_mortgaged && me.cash >= unm_cost;
+                                let can_m = !busy && is_my_turn && !prop_state.is_mortgaged;
+                                let can_u = !busy && is_my_turn && prop_state.is_mortgaged && me.cash >= unm_cost;
                                 let on_m = on_action;
                                 let on_u = on_action;
                                 view! {
