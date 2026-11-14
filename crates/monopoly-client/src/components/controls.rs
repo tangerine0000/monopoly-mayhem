@@ -24,6 +24,8 @@ pub fn Controls(
     on_action: Callback<ClientMessage>,
     selected_tile: ReadSignal<Option<u8>>,
 ) -> impl IntoView {
+    let _ = display_dice;
+
     let is_my_turn = move || {
         let cur = state.get().current_player().map(|p| p.id);
         my_player_id.get().is_some() && cur == my_player_id.get()
@@ -168,36 +170,6 @@ pub fn Controls(
                     }).collect_view()
                 }}
             </div>
-
-            // Compact Dice Status Bar
-            {move || {
-                let (d1, d2) = display_dice.get();
-                let sum = d1 + d2;
-                let rolling = is_rolling.get();
-                view! {
-                    <div style=format!(
-                        "height: 36px; padding: 0 12px; border-radius: 8px; background: {}; border: 1px solid {}; display: flex; align-items: center; justify-content: space-between;",
-                        BG_SECONDARY, BORDER_DEFAULT
-                    )>
-                        <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>
-                            {if rolling {
-                                "Trạng thái xúc xắc"
-                            } else if d1 == d2 {
-                                "Xúc xắc đôi"
-                            } else {
-                                "Kết quả xúc xắc"
-                            }}
-                        </span>
-                        <span class="mono" style=format!("font-size: 13px; font-weight: 500; color: {};", TEXT_PRIMARY)>
-                            {if rolling {
-                                "Đang lắc".to_string()
-                            } else {
-                                format!("{} + {} = {} nút", d1, d2, sum)
-                            }}
-                        </span>
-                    </div>
-                }
-            }}
 
             // Primary Turn Phase Actions
             <div style="display: flex; flex-direction: column; gap: 8px;">

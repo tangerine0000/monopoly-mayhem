@@ -1127,35 +1127,6 @@ pub fn Board(
                                 stroke=if is_doubles { "rgba(212, 155, 53, 0.72)" } else { "rgba(230, 196, 120, 0.35)" }
                                 stroke-width="1"
                             />
-                            <rect
-                                x="512"
-                                y="310"
-                                width="256"
-                                height="24"
-                                rx="12"
-                                fill="#182d46"
-                                stroke="rgba(212, 168, 83, 0.4)"
-                                stroke-width="1"
-                                opacity="0.94"
-                            />
-                            <text
-                                x="640"
-                                y="326"
-                                font-size="11.5"
-                                font-weight="500"
-                                font-family="'Roboto Mono', monospace"
-                                fill=if is_doubles { STATUS_WARNING } else { "#fbf7ee" }
-                                text-anchor="middle"
-                            >
-                                {if rolling {
-                                    "Đang tung xúc xắc...".to_string()
-                                } else if is_doubles {
-                                    format!("Xúc xắc đôi: {} + {} = {} · Thêm lượt", d1, d2, d1 + d2)
-                                } else {
-                                    format!("Kết quả: {} + {} = {}", d1, d2, d1 + d2)
-                                }}
-
-                            </text>
                         </g>
                     }
                 }}
