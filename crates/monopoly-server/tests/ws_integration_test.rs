@@ -351,6 +351,7 @@ async fn test_configure_game_host_only_and_rejected_after_start() {
         &mut sink1,
         &ClientMessage::ConfigureGame {
             enable_auction: false,
+            max_players: None,
         },
     )
     .await;
@@ -378,6 +379,7 @@ async fn test_configure_game_host_only_and_rejected_after_start() {
         &mut sink2,
         &ClientMessage::ConfigureGame {
             enable_auction: true,
+            max_players: None,
         },
     )
     .await;
@@ -403,6 +405,7 @@ async fn test_configure_game_host_only_and_rejected_after_start() {
         &mut sink1,
         &ClientMessage::ConfigureGame {
             enable_auction: true,
+            max_players: None,
         },
     )
     .await;

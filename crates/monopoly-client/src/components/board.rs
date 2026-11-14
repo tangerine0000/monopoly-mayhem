@@ -4,7 +4,7 @@
 use crate::palette::{
     fmt_short, player_color, player_vehicle_svg, tile_color, tile_icon_svg, tile_short_name,
 };
-use leptos::*;
+use leptos::prelude::*;
 use monopoly_core::board::{get_board, Tile, TileKind};
 use monopoly_core::money::Money;
 use monopoly_core::state::GameState;
@@ -238,16 +238,16 @@ pub fn Board(
             };
 
             view! {
-                <button class=class style=style title=title_hint aria-label=aria on:click=move |_| on_tile_click.call(idx)>
+                <button class=class style=style title=title_hint aria-label=aria on:click=move |_| on_tile_click.run(idx)>
                     {plate_color.map(|col| view! {
                         <div class="plate" style=format!("background: {col};")>
                             {move || {
                                 let houses = prop().house_count;
                                 let pop = if recent_house_tile.get() == Some(idx) { " pop" } else { "" };
                                 if houses == 5 {
-                                    view! { <span class=format!("hotel{pop}")></span> }.into_view()
+                                    view! { <span class=format!("hotel{pop}")></span> }.into_any()
                                 } else {
-                                    (0..houses).map(|_| view! { <span class=format!("house{pop}")></span> }).collect_view()
+                                    (0..houses).map(|_| view! { <span class=format!("house{pop}")></span> }).collect_view().into_any()
                                 }
                             }}
                         </div>
@@ -363,7 +363,7 @@ pub fn MiniMap(
                                 stroke="#fffaf0"
                                 stroke-width="0.4"
                                 style="cursor: pointer;"
-                                on:click=move |_| on_jump_tile.call(idx)
+                                on:click=move |_| on_jump_tile.run(idx)
                             />
                         }
                     })

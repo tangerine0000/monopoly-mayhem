@@ -1,6 +1,6 @@
 //! Bản tin: mỗi sự kiện một dòng, chỉ hiện vài dòng mới nhất; mở rộng khi cần.
 
-use leptos::*;
+use leptos::prelude::*;
 
 const COLLAPSED_COUNT: usize = 5;
 

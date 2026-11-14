@@ -466,11 +466,12 @@ impl RoomActor {
 
         if matches!(action, ClientMessage::ConfigureGame { .. }) {
             if let Some(tx) = self.clients.get(&player_id) {
-                let _ = tx
-                    .send(ServerMessage::ActionRejected {
+                Self::send_to_client(
+                    tx,
+                    &ServerMessage::ActionRejected {
                         reason: "Chỉ có thể chỉnh luật phòng trước khi bắt đầu".to_string(),
-                    })
-                    .await;
+                    },
+                );
             }
             return false;
         }

@@ -8,7 +8,7 @@ use crate::palette::{
     ICON_CLOSE, ICON_DICE, ICON_INFO, ICON_STAR,
 };
 use crate::ws::{save_storage_session_token, WsClient};
-use leptos::*;
+use leptos::prelude::*;
 use monopoly_core::board::{get_board, Tile, TileKind};
 use monopoly_core::bot::decide_action;
 use monopoly_core::rules::{apply_action, close_auction};
@@ -153,7 +153,8 @@ pub fn App() -> impl IntoView {
     let (manual_cam_tile, set_manual_cam_tile) = create_signal::<Option<u8>>(None);
 
     // Stored references for timers, narrative pacing, WS client, and local bots
-    let ws_client_ref: StoredValue<Option<Rc<WsClient>>> = store_value(None);
+    let ws_client_ref: StoredValue<Option<Rc<WsClient>>, LocalStorage> =
+        StoredValue::new_local(None);
     let local_bot_map: StoredValue<Vec<(PlayerId, bool)>> = store_value(Vec::new());
     let local_bot_gen: StoredValue<u64> = store_value(0);
     let local_auction_gen: StoredValue<u64> = store_value(0);
@@ -1007,41 +1008,39 @@ pub fn App() -> impl IntoView {
         *bots_slot.borrow_mut() = Some(bots_fn);
     }
 
-    let send_action = Callback::new({
-        let exec_rc = execute_local_rc.clone();
-        move |msg: ClientMessage| {
-            if is_local_mode.get_untracked() {
-                let st = game_state.get_untracked();
-                let actor = match msg {
-                    ClientMessage::PayDebt | ClientMessage::DeclareBankruptcy => st
-                        .debt
-                        .as_ref()
-                        .map(|d| d.debtor)
-                        .or_else(|| my_player_id.get_untracked()),
-                    ClientMessage::RespondTrade { .. } => st
-                        .trade
-                        .as_ref()
-                        .map(|t| t.to)
-                        .or_else(|| my_player_id.get_untracked()),
-                    ClientMessage::CancelTrade => st
-                        .trade
-                        .as_ref()
-                        .map(|t| t.from)
-                        .or_else(|| my_player_id.get_untracked()),
-                    _ => my_player_id
-                        .get_untracked()
-                        .or_else(|| st.current_player().map(|p| p.id)),
-                };
-                if let Some(actor_id) = actor {
-                    exec_rc(actor_id, msg);
-                }
-            } else {
-                ws_client_ref.with_value(|c| {
-                    if let Some(client) = c {
-                        client.send(msg);
-                    }
-                });
+    let exec_sv = StoredValue::new_local(execute_local_rc.clone());
+    let send_action = Callback::new(move |msg: ClientMessage| {
+        if is_local_mode.get_untracked() {
+            let st = game_state.get_untracked();
+            let actor = match msg {
+                ClientMessage::PayDebt | ClientMessage::DeclareBankruptcy => st
+                    .debt
+                    .as_ref()
+                    .map(|d| d.debtor)
+                    .or_else(|| my_player_id.get_untracked()),
+                ClientMessage::RespondTrade { .. } => st
+                    .trade
+                    .as_ref()
+                    .map(|t| t.to)
+                    .or_else(|| my_player_id.get_untracked()),
+                ClientMessage::CancelTrade => st
+                    .trade
+                    .as_ref()
+                    .map(|t| t.from)
+                    .or_else(|| my_player_id.get_untracked()),
+                _ => my_player_id
+                    .get_untracked()
+                    .or_else(|| st.current_player().map(|p| p.id)),
+            };
+            if let Some(actor_id) = actor {
+                exec_sv.with_value(|f| f(actor_id, msg));
             }
+        } else {
+            ws_client_ref.with_value(|c| {
+                if let Some(client) = c {
+                    client.send(msg);
+                }
+            });
         }
     });
 
@@ -1227,7 +1226,7 @@ pub fn App() -> impl IntoView {
                             st.current_player().map(|p| p.id) == my_player_id.get_untracked();
                         if is_my_turn {
                             ev.prevent_default();
-                            send_action.call(ClientMessage::RollDice);
+                            send_action.run(ClientMessage::RollDice);
                         }
                     }
                     _ => {}
@@ -1268,6 +1267,8 @@ pub fn App() -> impl IntoView {
 
     // #39 real sample deed data for Lobby preview
     let sample_tile = get_board()[39].clone();
+    let start_local_sv = StoredValue::new_local(start_local_game.clone());
+    let connect_online_sv = StoredValue::new_local(connect_online.clone());
 
     view! {
         <div class="app-shell">
@@ -1340,7 +1341,7 @@ pub fn App() -> impl IntoView {
                     <Show when=move || in_game.get()>
                         <button
                             class="pill-dark"
-                            on:click=move |_| back_to_lobby.call(())
+                            on:click=move |_| back_to_lobby.run(())
                         >
                             "Về sảnh"
                         </button>
@@ -1394,13 +1395,11 @@ pub fn App() -> impl IntoView {
                                     <span>"Gạch bông & Bảng hiệu"</span>
                                 </div>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     } else {
-                        view! {}.into_view()
+                        view! {}.into_any()
                     };
 
-                    let start_local = start_local_game.clone();
-                    let connect_online_tab = connect_online.clone();
                     view! {
                         <div class="lobby-shell">
                             <div class="lobby-grid">
@@ -1426,8 +1425,6 @@ pub fn App() -> impl IntoView {
 
                                         {move || match lobby_tab.get() {
                                             LobbyTab::Online => {
-                                                let conn_join = connect_online_tab.clone();
-                                                let conn_create = connect_online_tab.clone();
                                                 view! {
                                                 <div style="display: flex; flex-direction: column; gap: 12px;">
                                                     <div class="field">
@@ -1467,7 +1464,7 @@ pub fn App() -> impl IntoView {
                                                         <button
                                                             class="btn btn-primary"
                                                             on:click=move |_| {
-                                                                conn_join(room_id.get(), player_name.get(), enable_auction_cfg.get());
+                                                                connect_online_sv.with_value(|f| f(room_id.get(), player_name.get(), enable_auction_cfg.get()));
                                                             }
                                                         >
                                                             "Vào phòng"
@@ -1477,17 +1474,16 @@ pub fn App() -> impl IntoView {
                                                             on:click=move |_| {
                                                                 let generated = format!("SGN-{}", Uuid::new_v4().to_string()[..4].to_uppercase());
                                                                 set_room_id.set(generated.clone());
-                                                                conn_create(generated, player_name.get(), enable_auction_cfg.get());
+                                                                connect_online_sv.with_value(|f| f(generated, player_name.get(), enable_auction_cfg.get()));
                                                             }
                                                         >
                                                             "Tạo phòng mới"
                                                         </button>
                                                     </div>
                                                 </div>
-                                            }.into_view()
+                                            }.into_any()
                                             },
                                             LobbyTab::Local => {
-                                                let start_local = start_local.clone();
                                                 view! {
                                                     <div style="display: flex; flex-direction: column; gap: 12px;">
                                                         <div class="field">
@@ -1532,7 +1528,7 @@ pub fn App() -> impl IntoView {
                                                                                 }
                                                                             />
                                                                             {if idx == 0 {
-                                                                                view! { <span class="slot-host">"Chủ bàn"</span> }.into_view()
+                                                                                view! { <span class="slot-host">"Chủ bàn"</span> }.into_any()
                                                                             } else {
                                                                                 view! {
                                                                                     <button
@@ -1544,7 +1540,7 @@ pub fn App() -> impl IntoView {
                                                                                     >
                                                                                         {if slot.is_bot { "Máy AI" } else { "Người" }}
                                                                                     </button>
-                                                                                }.into_view()
+                                                                                }.into_any()
                                                                             }}
                                                                         </div>
                                                                     }
@@ -1569,13 +1565,13 @@ pub fn App() -> impl IntoView {
                                                         <button
                                                             class="btn btn-primary"
                                                             style="width: 100%;"
-                                                            on:click=move |_| start_local()
+                                                            on:click=move |_| start_local_sv.with_value(|f| f())
                                                         >
                                                             <span style="width: 18px; height: 18px; display: inline-flex;" inner_html=ICON_DICE></span>
                                                             "Bắt đầu ván tại máy"
                                                         </button>
                                                     </div>
-                                                }.into_view()
+                                                }.into_any()
                                             }
                                         }}
                                     </div>
@@ -1708,7 +1704,7 @@ pub fn App() -> impl IntoView {
                                         </div>
                                         <button
                                             class="btn btn-ghost btn-sm"
-                                            on:click=move |_| back_to_lobby.call(())
+                                            on:click=move |_| back_to_lobby.run(())
                                         >
                                             "Rời phòng"
                                         </button>
@@ -1728,20 +1724,20 @@ pub fn App() -> impl IntoView {
                                                         ></span>
                                                         <span class="wr-name">{p.name.clone()}</span>
                                                         {if seat == 0 {
-                                                            view! { <span class="wr-badge host">"Chủ phòng"</span> }.into_view()
+                                                            view! { <span class="wr-badge host">"Chủ phòng"</span> }.into_any()
                                                         } else if is_me {
-                                                            view! { <span class="wr-badge me">"Bạn"</span> }.into_view()
+                                                            view! { <span class="wr-badge me">"Bạn"</span> }.into_any()
                                                         } else {
-                                                            view! { <span class="wr-badge">"Sẵn sàng"</span> }.into_view()
+                                                            view! { <span class="wr-badge">"Sẵn sàng"</span> }.into_any()
                                                         }}
                                                     </div>
-                                                }.into_view()
+                                                }.into_any()
                                             } else {
                                                 view! {
                                                     <div class="wr-seat empty">
                                                         {format!("Ghế #{} · Đang chờ người chơi...", seat + 1)}
                                                     </div>
-                                                }.into_view()
+                                                }.into_any()
                                             }
                                         }).collect_view()}
                                     </div>
@@ -1775,8 +1771,9 @@ pub fn App() -> impl IntoView {
                                                         role="switch"
                                                         aria-checked=if cur_auc { "true" } else { "false" }
                                                         on:click=move |_| {
-                                                            send_action.call(ClientMessage::ConfigureGame {
+                                                            send_action.run(ClientMessage::ConfigureGame {
                                                                 enable_auction: !cur_auc,
+                                                                max_players: None,
                                                             });
                                                         }
                                                     ></button>
@@ -1785,26 +1782,26 @@ pub fn App() -> impl IntoView {
                                                     <button
                                                         class="btn btn-ghost"
                                                         disabled=p_count >= 4
-                                                        on:click=move |_| send_action.call(ClientMessage::AddBot)
+                                                        on:click=move |_| send_action.run(ClientMessage::AddBot)
                                                     >
                                                         "Thêm Máy AI"
                                                     </button>
                                                     <button
                                                         class="btn btn-primary"
                                                         disabled=p_count < 2
-                                                        on:click=move |_| send_action.call(ClientMessage::StartGame)
+                                                        on:click=move |_| send_action.run(ClientMessage::StartGame)
                                                     >
                                                         "Bắt đầu ván"
                                                     </button>
                                                 </div>
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
                                         view! {
                                             <div class="waiting" style="justify-content: center;">
                                                 <span>"Đang chờ "<b>"Chủ phòng"</b>" bắt đầu ván..."</span>
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     }}
                                 </div>
                             </div>

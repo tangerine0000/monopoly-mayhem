@@ -53,7 +53,10 @@ impl WsClient {
                 let _ = guard.send(Message::Text(json)).await;
             }
             if is_new_join {
-                let cfg_msg = ClientMessage::ConfigureGame { enable_auction };
+                let cfg_msg = ClientMessage::ConfigureGame {
+                    enable_auction,
+                    max_players: None,
+                };
                 if let Ok(cfg_json) = serde_json::to_string(&cfg_msg) {
                     let _ = guard.send(Message::Text(cfg_json)).await;
                 }

@@ -5,7 +5,7 @@ use crate::palette::{
     fmt_short, get_district_label, player_color, player_vehicle_svg, tile_color, tile_group_label,
     tile_short_name, ICON_BARS, ICON_CLOSE, ICON_INFO, ICON_STAR,
 };
-use leptos::*;
+use leptos::prelude::*;
 use monopoly_core::board::{get_board, get_district_tiles, District, Tile, TileKind};
 use monopoly_core::money::Money;
 use monopoly_core::state::{GameState, PropertyState, TradeOffer, TurnPhase, JAIL_BAIL_VND};
@@ -159,14 +159,14 @@ fn pip_cells(v: u8) -> &'static [(u8, u8)] {
     }
 }
 
-fn die_view(value: u8, class: String) -> View {
+fn die_view(value: u8, class: String) -> impl IntoView {
     let red = if value == 1 || value == 4 { " red" } else { "" };
     view! {
         <div class=format!("die{red} {class}")>
             {pip_cells(value).iter().map(|(r, c)| view! { <i style=format!("grid-area: {r} / {c};")></i> }).collect_view()}
         </div>
     }
-    .into_view()
+    .into_any()
 }
 
 #[component]
@@ -428,7 +428,7 @@ pub fn Stage(
                     </div>
                     <div class="stub" inner_html=stub></div>
                 </div>
-                <button class="btn btn-gold btn-sm ticket-ack" on:click=move |_| on_dismiss_card.call(())>
+                <button class="btn btn-gold btn-sm ticket-ack" on:click=move |_| on_dismiss_card.run(())>
                     <span>"Đã hiểu"</span>
                     <span class="ticket-bar"></span>
                 </button>
@@ -515,25 +515,25 @@ pub fn Stage(
                                 <span class="badge" inner_html=if star { ICON_STAR } else { ICON_INFO }></span>
                                 <span>{why_title}<small>{why_sub}</small></span>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     } else {
                         view! {
                             <div class="why bad">
                                 <span class="badge" inner_html=ICON_INFO></span>
                                 <span>"Không đủ tiền"<small>{format!("Thiếu {}", fmt_short(cost - cash))}</small></span>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }}
                     <div class="actions">
-                        <button class="btn btn-primary" disabled=!affordable on:click=move |_| on_action.call(ClientMessage::BuyProperty)>"Mua"</button>
-                        <button class="btn btn-ghost" on:click=move |_| on_action.call(ClientMessage::DeclineProperty)>
+                        <button class="btn btn-primary" disabled=!affordable on:click=move |_| on_action.run(ClientMessage::BuyProperty)>"Mua"</button>
+                        <button class="btn btn-ghost" on:click=move |_| on_action.run(ClientMessage::DeclineProperty)>
                             {if enable_auction { "Đấu giá" } else { "Bỏ qua" }}
                         </button>
                     </div>
                     {move || if show_rent.get() {
-                        view! { <RentTable tile=rent_tile.clone() prop=prop state=state /> }.into_view()
+                        view! { <RentTable tile=rent_tile.clone() prop=prop state=state /> }.into_any()
                     } else {
-                        ().into_view()
+                        ().into_any()
                     }}
                     <div class="center-link">
                         <button class="linkbtn" on:click=move |_| set_show_rent.update(|v| *v = !*v)>
@@ -607,9 +607,9 @@ pub fn Stage(
                 <div class="sheet-body">
                     <div class="auction-bid">
                         {if bid == Money::ZERO {
-                            view! { <span class="v" style="font-size: 26px;">"Chưa ai trả giá"</span> }.into_view()
+                            view! { <span class="v" style="font-size: 26px;">"Chưa ai trả giá"</span> }.into_any()
                         } else {
-                            view! { <span class="v">{bid.to_string()}</span> }.into_view()
+                            view! { <span class="v">{bid.to_string()}</span> }.into_any()
                         }}
                         {leader.map(|(seat, name, is_me)| view! {
                             <span class="leader">
@@ -624,17 +624,17 @@ pub fn Stage(
                         }).collect_view()}
                     </div>
                     {if i_am_leading {
-                        view! { <div class="center-link"><span class="pf-hint">"Bạn đang trả giá cao nhất · chờ người khác"</span></div> }.into_view()
+                        view! { <div class="center-link"><span class="pf-hint">"Bạn đang trả giá cao nhất · chờ người khác"</span></div> }.into_any()
                     } else if i_am_in {
                         view! {
                             <div class="actions three">
-                                <button class="btn btn-gold" disabled={my_cash < bid_small} on:click=move |_| on_action.call(ClientMessage::PlaceBid { amount: bid_small })>"+100k"</button>
-                                <button class="btn btn-gold" disabled={my_cash < bid_big} on:click=move |_| on_action.call(ClientMessage::PlaceBid { amount: bid_big })>"+500k"</button>
-                                <button class="btn btn-ghost" on:click=move |_| on_action.call(ClientMessage::PassAuction)>"Bỏ"</button>
+                                <button class="btn btn-gold" disabled={my_cash < bid_small} on:click=move |_| on_action.run(ClientMessage::PlaceBid { amount: bid_small })>"+100k"</button>
+                                <button class="btn btn-gold" disabled={my_cash < bid_big} on:click=move |_| on_action.run(ClientMessage::PlaceBid { amount: bid_big })>"+500k"</button>
+                                <button class="btn btn-ghost" on:click=move |_| on_action.run(ClientMessage::PassAuction)>"Bỏ"</button>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     } else {
-                        view! { <div class="center-link"><span class="pf-hint">"Bạn đã rời phiên đấu giá"</span></div> }.into_view()
+                        view! { <div class="center-link"><span class="pf-hint">"Bạn đã rời phiên đấu giá"</span></div> }.into_any()
                     }}
                 </div>
             </div>
@@ -739,13 +739,13 @@ pub fn Stage(
                     {(!enough && (!sell_opts.is_empty() || !mortgage_opts.is_empty())).then(|| view! {
                         <div class="opts">
                             {sell_opts.into_iter().map(|(idx, name, val)| view! {
-                                <button class="opt" on:click=move |_| on_action.call(ClientMessage::SellHouse { tile_index: idx })>
+                                <button class="opt" on:click=move |_| on_action.run(ClientMessage::SellHouse { tile_index: idx })>
                                     <span>{format!("Bán 1 nhà · {name}")}</span>
                                     <b class="num">{format!("+{}", fmt_short(val))}</b>
                                 </button>
                             }).collect_view()}
                             {mortgage_opts.into_iter().map(|(idx, name, val)| view! {
-                                <button class="opt" on:click=move |_| on_action.call(ClientMessage::MortgageProperty { tile_index: idx })>
+                                <button class="opt" on:click=move |_| on_action.run(ClientMessage::MortgageProperty { tile_index: idx })>
                                     <span>{format!("Thế chấp · {name}")}</span>
                                     <b class="num">{format!("+{}", fmt_short(val))}</b>
                                 </button>
@@ -753,10 +753,10 @@ pub fn Stage(
                         </div>
                     })}
                     <div class="action-stack" style="width: 100%;">
-                        <button class="btn btn-primary btn-wide" disabled=!enough on:click=move |_| on_action.call(ClientMessage::PayDebt)>
+                        <button class="btn btn-primary btn-wide" disabled=!enough on:click=move |_| on_action.run(ClientMessage::PayDebt)>
                             {format!("Trả tiền ({})", fmt_short(debt_amt))}
                         </button>
-                        <button class="linkbtn" on:click=move |_| on_action.call(ClientMessage::DeclareBankruptcy)>
+                        <button class="linkbtn" on:click=move |_| on_action.run(ClientMessage::DeclareBankruptcy)>
                             "Tuyên bố phá sản"
                         </button>
                     </div>
@@ -821,8 +821,8 @@ pub fn Stage(
                         <div class="why"><span class="badge" inner_html=ICON_STAR></span><span>{line}</span></div>
                     })}
                     <div class="actions">
-                        <button class="btn btn-primary" on:click=move |_| on_action.call(ClientMessage::RespondTrade { accept: true })>"Đồng ý"</button>
-                        <button class="btn btn-ghost" on:click=move |_| on_action.call(ClientMessage::RespondTrade { accept: false })>"Từ chối"</button>
+                        <button class="btn btn-primary" on:click=move |_| on_action.run(ClientMessage::RespondTrade { accept: true })>"Đồng ý"</button>
+                        <button class="btn btn-ghost" on:click=move |_| on_action.run(ClientMessage::RespondTrade { accept: false })>"Từ chối"</button>
                     </div>
                 </div>
             </div>
@@ -915,7 +915,7 @@ pub fn Stage(
                             <span class="sub">"Bạn đưa"</span>
                             <div class="tile-chips">
                                 {if my_tiles.is_empty() {
-                                    view! { <span class="pf-hint">"Không có đất"</span> }.into_view()
+                                    view! { <span class="pf-hint">"Không có đất"</span> }.into_any()
                                 } else {
                                     my_tiles.into_iter().map(|(idx, name, col)| {
                                         let sel = give_tiles.with(|v| v.contains(&idx));
@@ -929,7 +929,7 @@ pub fn Stage(
                                                 <i style=format!("background: {col};")></i>{name}
                                             </button>
                                         }
-                                    }).collect_view()
+                                    }).collect_view().into_any()
                                 }}
                             </div>
                             <div class="cash-step">
@@ -945,7 +945,7 @@ pub fn Stage(
                             <span class="sub">"Bạn nhận"</span>
                             <div class="tile-chips">
                                 {if target_tiles.is_empty() {
-                                    view! { <span class="pf-hint">"Không có đất"</span> }.into_view()
+                                    view! { <span class="pf-hint">"Không có đất"</span> }.into_any()
                                 } else {
                                     target_tiles.into_iter().map(|(idx, name, col)| {
                                         let sel = take_tiles.with(|v| v.contains(&idx));
@@ -959,7 +959,7 @@ pub fn Stage(
                                                 <i style=format!("background: {col};")></i>{name}
                                             </button>
                                         }
-                                    }).collect_view()
+                                    }).collect_view().into_any()
                                 }}
                             </div>
                             <div class="cash-step">
@@ -980,7 +980,7 @@ pub fn Stage(
                             class="btn btn-primary"
                             disabled=!valid
                             on:click=move |_| {
-                                on_action.call(ClientMessage::ProposeTrade {
+                                on_action.run(ClientMessage::ProposeTrade {
                                     to: target_id,
                                     give_tiles: give_tiles.get_untracked(),
                                     give_cash: Money::from_vnd(give_cash_k.get_untracked() * 1_000),
@@ -1006,7 +1006,7 @@ pub fn Stage(
         Some(view! {
             <div class="waiting-card card">
                 <span>"Đang chờ "<b>{to_name}</b>" trả lời đề nghị giao dịch…"</span>
-                <button class="btn btn-ghost btn-sm" on:click=move |_| on_action.call(ClientMessage::CancelTrade)>"Rút lại"</button>
+                <button class="btn btn-ghost btn-sm" on:click=move |_| on_action.run(ClientMessage::CancelTrade)>"Rút lại"</button>
             </div>
         })
     };
@@ -1080,7 +1080,7 @@ pub fn Stage(
                             }
                         }).collect_view()}
                     </div>
-                    <button class="btn btn-primary btn-wide" on:click=move |_| on_back_to_lobby.call(())>"Về sảnh chơi lại"</button>
+                    <button class="btn btn-primary btn-wide" on:click=move |_| on_back_to_lobby.run(())>"Về sảnh chơi lại"</button>
                 </div>
             </div>
         }
@@ -1149,11 +1149,11 @@ pub fn Stage(
                                     <span>{if is_me { "Của bạn".to_string() } else { name }}</span>
                                     <span class="sub">{sub_text}</span>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         }
                         None => view! {
                             <div class="price-row"><b>{tile_cost(&tile).map(|c| c.to_string()).unwrap_or_default()}</b><span>"Chưa có chủ"</span></div>
-                        }.into_view(),
+                        }.into_any(),
                     })}
                     {prop.is_mortgaged.then(|| view! {
                         <div class="why bad"><span class="badge" inner_html=ICON_BARS></span><span>"Đang thế chấp"<small>"Không thu tiền thuê tới khi chuộc lại"</small></span></div>
@@ -1161,21 +1161,21 @@ pub fn Stage(
                     {mine.then(|| view! {
                         <div class="actions two-even">
                             {is_property.then(|| view! {
-                                <button class="btn btn-gold btn-sm" disabled={!can_manage} on:click=move |_| on_action.call(ClientMessage::BuildHouse { tile_index: idx })>"Xây nhà"</button>
-                                <button class="btn btn-ghost btn-sm" disabled={!can_manage || prop.house_count == 0} on:click=move |_| on_action.call(ClientMessage::SellHouse { tile_index: idx })>"Bán nhà"</button>
+                                <button class="btn btn-gold btn-sm" disabled={!can_manage} on:click=move |_| on_action.run(ClientMessage::BuildHouse { tile_index: idx })>"Xây nhà"</button>
+                                <button class="btn btn-ghost btn-sm" disabled={!can_manage || prop.house_count == 0} on:click=move |_| on_action.run(ClientMessage::SellHouse { tile_index: idx })>"Bán nhà"</button>
                             })}
                             {if prop.is_mortgaged {
-                                view! { <button class="btn btn-ghost btn-sm" disabled={!can_manage} on:click=move |_| on_action.call(ClientMessage::UnmortgageProperty { tile_index: idx })>"Chuộc lại"</button> }.into_view()
+                                view! { <button class="btn btn-ghost btn-sm" disabled={!can_manage} on:click=move |_| on_action.run(ClientMessage::UnmortgageProperty { tile_index: idx })>"Chuộc lại"</button> }.into_any()
                             } else {
-                                view! { <button class="btn btn-ghost btn-sm" disabled={!can_manage || prop.house_count > 0} on:click=move |_| on_action.call(ClientMessage::MortgageProperty { tile_index: idx })>{format!("Thế chấp +{mval}")}</button> }.into_view()
+                                view! { <button class="btn btn-ghost btn-sm" disabled={!can_manage || prop.house_count > 0} on:click=move |_| on_action.run(ClientMessage::MortgageProperty { tile_index: idx })>{format!("Thế chấp +{mval}")}</button> }.into_any()
                             }}
                         </div>
                     })}
                     {purchasable.then(|| view! {
                         {move || if show_rent.get() {
-                            view! { <RentTable tile=rent_tile.clone() prop=prop state=state /> }.into_view()
+                            view! { <RentTable tile=rent_tile.clone() prop=prop state=state /> }.into_any()
                         } else {
-                            ().into_view()
+                            ().into_any()
                         }}
                         <div class="center-link">
                             <button class="linkbtn" on:click=move |_| set_show_rent.update(|v| *v = !*v)>
@@ -1186,13 +1186,13 @@ pub fn Stage(
                 </div>
             </div>
         }
-        .into_view()
+        .into_any()
     };
 
     // ---------- Hàng nút hành động / trạng thái chờ ----------
     let actions = move || {
         if moving() || !state.with(|s| s.is_game_started) || state.with(|s| s.is_game_over) {
-            return ().into_view();
+            return ().into_any();
         }
         let cur_main = main.get();
         if matches!(
@@ -1203,7 +1203,7 @@ pub fn Stage(
                 | MainCard::ProposeTrade
                 | MainCard::OutgoingTrade
         ) {
-            return ().into_view();
+            return ().into_any();
         }
         if is_my_turn() {
             let (in_jail, cards, can_trade) = state.with(|s| {
@@ -1221,13 +1221,13 @@ pub fn Stage(
             match phase() {
                 TurnPhase::WaitingForRoll => view! {
                     <div class="action-stack">
-                        <button class="btn btn-primary btn-wide" on:click=move |_| on_action.call(ClientMessage::RollDice)>"Lắc xúc xắc"</button>
+                        <button class="btn btn-primary btn-wide" on:click=move |_| on_action.run(ClientMessage::RollDice)>"Lắc xúc xắc"</button>
                         <div class="row">
                             {in_jail.then(|| view! {
-                                <button class="btn btn-ghost btn-sm" on:click=move |_| on_action.call(ClientMessage::PayJailBail)>"Nộp phạt 500k"</button>
+                                <button class="btn btn-ghost btn-sm" on:click=move |_| on_action.run(ClientMessage::PayJailBail)>"Nộp phạt 500k"</button>
                             })}
                             {(in_jail && cards > 0).then(|| view! {
-                                <button class="btn btn-ghost btn-sm" on:click=move |_| on_action.call(ClientMessage::UseJailCard)>"Thẻ ra tù"</button>
+                                <button class="btn btn-ghost btn-sm" on:click=move |_| on_action.run(ClientMessage::UseJailCard)>"Thẻ ra tù"</button>
                             })}
                             {can_trade.then(|| view! {
                                 <button class="btn btn-ghost btn-sm" on:click=move |_| set_trade_open.set(true)>"Giao dịch"</button>
@@ -1235,10 +1235,10 @@ pub fn Stage(
                         </div>
                     </div>
                 }
-                .into_view(),
+                .into_any(),
                 TurnPhase::TurnEnded => view! {
                     <div class="action-stack">
-                        <button class="btn btn-primary btn-wide" on:click=move |_| on_action.call(ClientMessage::EndTurn)>"Kết thúc lượt"</button>
+                        <button class="btn btn-primary btn-wide" on:click=move |_| on_action.run(ClientMessage::EndTurn)>"Kết thúc lượt"</button>
                         {can_trade.then(|| view! {
                             <div class="row">
                                 <button class="btn btn-ghost btn-sm" on:click=move |_| set_trade_open.set(true)>"Giao dịch với người khác"</button>
@@ -1246,8 +1246,8 @@ pub fn Stage(
                         })}
                     </div>
                 }
-                .into_view(),
-                _ => ().into_view(),
+                .into_any(),
+                _ => ().into_any(),
             }
         } else if phase() == TurnPhase::Debt {
             let debtor_name = state.with(|s| {
@@ -1257,17 +1257,16 @@ pub fn Stage(
                     .map(|p| p.name.clone())
                     .unwrap_or_default()
             });
-            view! { <div class="waiting"><span>"Đang chờ "<b>{debtor_name}</b>" gom tiền trả nợ…"</span></div> }.into_view()
+            view! { <div class="waiting"><span>"Đang chờ "<b>{debtor_name}</b>" gom tiền trả nợ…"</span></div> }.into_any()
         } else if phase() != TurnPhase::Auction {
             let name = state.with(|s| {
                 s.current_player()
                     .map(|p| p.name.clone())
                     .unwrap_or_default()
             });
-            view! { <div class="waiting"><span>"Đang chờ "<b>{name}</b>"…"</span></div> }
-                .into_view()
+            view! { <div class="waiting"><span>"Đang chờ "<b>{name}</b>"…"</span></div> }.into_any()
         } else {
-            ().into_view()
+            ().into_any()
         }
     };
 
@@ -1277,15 +1276,15 @@ pub fn Stage(
             {dice}
             {ticket}
             {move || match main.get() {
-                MainCard::GameOver => game_over().into_view(),
-                MainCard::Auction => auction().into_view(),
-                MainCard::IncomingTrade => incoming_trade().into_view(),
-                MainCard::Debt => debt_card().into_view(),
-                MainCard::Decision => decision().into_view(),
-                MainCard::ProposeTrade => propose_trade().into_view(),
-                MainCard::OutgoingTrade => outgoing_trade().into_view(),
+                MainCard::GameOver => game_over().into_any(),
+                MainCard::Auction => auction().into_any(),
+                MainCard::IncomingTrade => incoming_trade().into_any(),
+                MainCard::Debt => debt_card().into_any(),
+                MainCard::Decision => decision().into_any(),
+                MainCard::ProposeTrade => propose_trade().into_any(),
+                MainCard::OutgoingTrade => outgoing_trade().into_any(),
                 MainCard::Inspect(i) => inspect(i),
-                MainCard::None => ().into_view(),
+                MainCard::None => ().into_any(),
             }}
             {actions}
         </div>

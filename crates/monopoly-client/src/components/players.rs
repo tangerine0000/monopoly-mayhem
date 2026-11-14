@@ -4,7 +4,7 @@ use crate::palette::{
     fmt_short, get_district_color, player_color, player_vehicle_svg, ALL_DISTRICTS, ICON_BARS,
     ICON_OFFLINE,
 };
-use leptos::*;
+use leptos::prelude::*;
 use monopoly_core::board::get_district_tiles;
 use monopoly_core::state::GameState;
 use monopoly_proto::PlayerId;
@@ -91,11 +91,11 @@ pub fn PlayersRail(
                                                 stroke-dasharray=RING_LEN stroke-dashoffset=RING_LEN * (1.0 - ratio)/>
                                         </svg>
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             } else {
                                 view! {
                                     <span class="avatar" style=format!("--c: {};", player_color(seat)) inner_html=player_vehicle_svg(seat)></span>
-                                }.into_view()
+                                }.into_any()
                             }}
                             <div class="p-meta" style="min-width: 0;">
                                 <div class="nm">

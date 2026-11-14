@@ -3,7 +3,7 @@
 use crate::palette::{
     get_district_color, get_district_label, ALL_DISTRICTS, TILE_STATION, TILE_UTILITY,
 };
-use leptos::*;
+use leptos::prelude::*;
 use monopoly_core::board::{get_board, get_district_tiles, TileKind};
 use monopoly_core::state::GameState;
 use monopoly_proto::{ClientMessage, PlayerId};
@@ -123,9 +123,9 @@ pub fn Portfolio(
     view! {
         <div class="card portfolio">
             {move || if rows.with(|r| r.is_empty()) {
-                view! { <div class="empty">"Bạn chưa có đất. Dừng ở ô trống để mua."</div> }.into_view()
+                view! { <div class="empty">"Bạn chưa có đất. Dừng ở ô trống để mua."</div> }.into_any()
             } else {
-                ().into_view()
+                ().into_any()
             }}
             <For
                 each=move || rows.get()
@@ -147,9 +147,9 @@ pub fn Portfolio(
                             </div>
                             {match row.build_on {
                                 Some(t) => view! {
-                                    <button class="btn btn-gold btn-sm" on:click=move |_| on_action.call(ClientMessage::BuildHouse { tile_index: t })>"Xây nhà"</button>
-                                }.into_view(),
-                                None => view! { <span class="pf-hint">{row.hint.clone()}</span> }.into_view(),
+                                    <button class="btn btn-gold btn-sm" on:click=move |_| on_action.run(ClientMessage::BuildHouse { tile_index: t })>"Xây nhà"</button>
+                                }.into_any(),
+                                None => view! { <span class="pf-hint">{row.hint.clone()}</span> }.into_any(),
                             }}
                         </div>
                     }
