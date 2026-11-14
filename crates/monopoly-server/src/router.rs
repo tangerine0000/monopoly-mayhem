@@ -1,4 +1,5 @@
-use crate::room::{RoomActor, RoomCommand};
+use crate::registry::LobbyRegistry;
+use crate::room::RoomCommand;
 use axum::{
     body::Body,
     extract::{
@@ -11,20 +12,18 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use monopoly_proto::{ClientMessage, RoomId, ServerMessage};
+use monopoly_proto::{ClientMessage, ServerMessage};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub registry: Arc<DashMap<String, mpsc::Sender<RoomCommand>>>,
+    pub registry: LobbyRegistry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,13 +73,10 @@ async fn create_room(
     State(state): State<AppState>,
     Json(_req): Json<CreateRoomRequest>,
 ) -> impl IntoResponse {
-    let raw_room_id = format!("SGN-{}", Uuid::new_v4().to_string()[..4].to_uppercase());
-    let room_id = RoomId(raw_room_id.clone());
-
-    let _tx = RoomActor::spawn(room_id, state.registry.clone());
+    let room_id = state.registry.create_room();
 
     Json(CreateRoomResponse {
-        room_id: raw_room_id,
+        room_id: room_id.0,
     })
 }
 
@@ -100,10 +96,7 @@ async fn ws_upgrade(
         None => return (StatusCode::BAD_REQUEST, "Missing 'room' query parameter").into_response(),
     };
 
-    let room_tx = match state.registry.get(&room_id) {
-        Some(tx) => tx.clone(),
-        None => RoomActor::spawn(RoomId(room_id.clone()), state.registry.clone()),
-    };
+    let room_tx = state.registry.get_or_spawn(&room_id);
 
     ws.on_upgrade(move |socket| handle_socket(socket, room_tx))
 }

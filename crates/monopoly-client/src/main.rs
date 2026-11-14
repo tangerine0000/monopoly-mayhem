@@ -1,6 +1,8 @@
 mod app;
 mod components;
+pub mod i18n;
 pub mod palette;
+pub mod store;
 mod ws;
 
 use app::App;

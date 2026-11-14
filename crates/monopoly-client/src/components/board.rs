@@ -1,17 +1,17 @@
+use crate::i18n::LocaleCatalog;
 use crate::palette::{
-    get_district_color, get_district_label, BOARD_CENTER_BG, BOARD_CENTER_BORDER, BOARD_OUTER_BG,
-    BORDER_DEFAULT, PLAYER_COLORS, STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_PANEL,
-    TEXT_MUTED, TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHANCE_BG,
+    get_district_color, BOARD_CENTER_BG, BOARD_CENTER_BORDER, BOARD_OUTER_BG, BORDER_DEFAULT,
+    PLAYER_COLORS, STATUS_DANGER, STATUS_SUCCESS, STATUS_WARNING, SURFACE_PANEL, TEXT_MUTED,
+    TEXT_ON_ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TILE_BG, TILE_CHANCE, TILE_CHANCE_BG,
     TILE_CHANCE_BORDER, TILE_CHANCE_INNER_BG, TILE_CHEST, TILE_CHEST_BG, TILE_CHEST_BORDER,
     TILE_CHEST_INNER_BG, TILE_CORNER_ACCENT, TILE_CORNER_BG, TILE_SELECTED_STROKE, TILE_STATION,
     TILE_STROKE, TILE_TAX, TILE_TEXT_MUTED, TILE_TEXT_PRIMARY, TILE_UTILITY,
 };
 use leptos::*;
-use monopoly_core::board::{get_board, get_district_tiles, TileKind};
+use monopoly_core::board::{BoardCatalog, TileKind};
 use monopoly_core::cards::{get_chance_deck, get_community_chest_deck, CardEffect};
-use monopoly_core::money::Money;
-use monopoly_core::state::{GameState, TurnPhase};
-use monopoly_proto::{ClientMessage, PlayerId};
+use monopoly_core::rules::RulesEngine;
+use monopoly_proto::{ClientMessage, DeckId, Locale, Money, PlayerId, PublicGameView, PublicTurnPhase};
 
 pub const BOARD_WIDTH: f64 = 1280.0;
 pub const BOARD_HEIGHT: f64 = 960.0;
@@ -96,35 +96,6 @@ fn wrap_tile_name(name: &str, max_chars: usize) -> Vec<String> {
         lines.push(current);
     }
     lines
-}
-
-/// Returns relative `(dx, dy, is_red)` pip positions centered around `(0, 0)` for a `64x64` die face (`1..=6`).
-#[allow(dead_code)]
-fn svg_die_pips_centered(value: u8) -> Vec<(f64, f64, bool)> {
-    let l = -16.0;
-    let c = 0.0;
-    let r = 16.0;
-    match value {
-        1 => vec![(c, c, true)],
-        2 => vec![(l, l, false), (r, r, false)],
-        3 => vec![(l, l, false), (c, c, false), (r, r, false)],
-        4 => vec![(l, l, true), (r, l, true), (l, r, true), (r, r, true)],
-        5 => vec![
-            (l, l, false),
-            (r, l, false),
-            (c, c, false),
-            (l, r, false),
-            (r, r, false),
-        ],
-        _ => vec![
-            (l, l, false),
-            (r, l, false),
-            (l, c, false),
-            (r, c, false),
-            (l, r, false),
-            (r, r, false),
-        ],
-    }
 }
 
 /// Returns the CSS 3D `transform` that rotates a 6-sided die cube so `value` (`1..=6`) faces the viewer with a subtle tabletop tilt.
@@ -496,7 +467,8 @@ pub fn PlayerAvatar(seat_idx: usize, #[prop(default = 28)] size: u32) -> impl In
 
 #[component]
 pub fn Board(
-    state: ReadSignal<GameState>,
+    state: ReadSignal<PublicGameView>,
+    locale: ReadSignal<Locale>,
     selected_tile: ReadSignal<Option<u8>>,
     is_rolling: ReadSignal<bool>,
     is_animating_move: ReadSignal<bool>,
@@ -508,7 +480,7 @@ pub fn Board(
     recent_acquired_tile: ReadSignal<Option<u8>>,
     recent_house_tile: ReadSignal<Option<u8>>,
     floating_popups: ReadSignal<Vec<BoardFloatingPopup>>,
-    drawn_card_banner: ReadSignal<Option<(String, String, String)>>,
+    drawn_card_banner: ReadSignal<Option<(DeckId, String, String)>>,
     my_player_id: ReadSignal<Option<PlayerId>>,
     timer_seconds: ReadSignal<u32>,
     is_local_mode: ReadSignal<bool>,
@@ -516,7 +488,7 @@ pub fn Board(
     #[prop(default = None)] on_roll_dice: Option<Callback<()>>,
     #[prop(default = None)] on_action: Option<Callback<ClientMessage>>,
 ) -> impl IntoView {
-    let board = get_board();
+    let board = BoardCatalog::all();
     let (camera_mode, set_camera_mode) = create_signal(0u8);
 
     view! {
@@ -576,14 +548,14 @@ pub fn Board(
                     let my_id = my_player_id.get();
                     let is_my_turn = my_id.is_some() && st.current_player().map(|p| p.id) == my_id;
                     let me_opt = my_id.and_then(|id| st.find_player(id));
-                    let has_urgent_decision = st.turn_phase == TurnPhase::Auction
-                        || (is_my_turn && st.turn_phase == TurnPhase::TileActionPending);
+                    let has_urgent_decision = st.turn_phase == PublicTurnPhase::Auction
+                        || (is_my_turn && st.turn_phase == PublicTurnPhase::TileActionPending);
 
                     if !has_urgent_decision {
-                        if let Some((deck_name, card_title, card_desc)) = drawn_card_banner.get() {
-                            let is_chance = deck_name.contains("Cơ Hội");
+                        if let Some((deck, card_title, card_desc)) = drawn_card_banner.get() {
+                            let is_chance = deck == DeckId::Chance;
                             let cls = if is_chance { "stage-drawn-card chance" } else { "stage-drawn-card chest" };
-                            let deck_label = if is_chance { "Thẻ Cơ hội" } else { "Thẻ Khí vận" };
+                            let deck_label = LocaleCatalog::deck_name(locale.get(), deck);
                             return view! {
                                 <div class="board-center-stage">
                                     <div class=cls>
@@ -605,9 +577,9 @@ pub fn Board(
                     }
 
                     // Auction Center Stage
-                    if st.turn_phase == TurnPhase::Auction {
+                    if st.turn_phase == PublicTurnPhase::Auction {
                         if let Some(auc) = st.auction.as_ref() {
-                            let tiles = get_board();
+                            let tiles = BoardCatalog::all();
                             if let Some(tile) = tiles.get(auc.tile_index as usize) {
                                 let badge_col = match &tile.kind {
                                     TileKind::Property(p) => get_district_color(p.district),
@@ -737,34 +709,36 @@ pub fn Board(
                     }
 
                     // Buy Property Decision Card in Center Stage
-                    if is_my_turn && st.turn_phase == TurnPhase::TileActionPending {
+                    if is_my_turn && st.turn_phase == PublicTurnPhase::TileActionPending {
                         if let Some(me) = me_opt {
-                            let tiles = get_board();
+                            let tiles = BoardCatalog::all();
                             let tile_idx = me.position;
+                            let loc = locale.get();
                             if let Some(tile) = tiles.get(tile_idx as usize) {
                                 let (cost, badge_col, badge_label, reason_text) = match &tile.kind {
                                     TileKind::Property(p) => {
-                                        let d_tiles = get_district_tiles(p.district);
+                                        let d_tiles = BoardCatalog::district_tiles(p.district);
                                         let owned_in_district = d_tiles
                                             .iter()
                                             .filter(|&&t| st.properties[t as usize].owner == Some(me.id))
                                             .count();
                                         let total_in_district = d_tiles.len();
                                         let missing_after = total_in_district.saturating_sub(owned_in_district + 1);
+                                        let dist_name = LocaleCatalog::district_name(loc, p.district);
                                         let reason = if missing_after == 0 {
-                                            format!("Đủ bộ {} · thuê ×2 và được xây nhà!", get_district_label(p.district))
+                                            format!("Đủ bộ {} · thuê ×2 và được xây nhà!", dist_name)
                                         } else {
                                             format!(
                                                 "Còn thiếu {} ô để đủ bộ {} · thuê gốc {}",
                                                 missing_after,
-                                                get_district_label(p.district),
+                                                dist_name,
                                                 p.rent_table[0]
                                             )
                                         };
-                                        (p.cost, get_district_color(p.district), get_district_label(p.district).to_string(), reason)
+                                        (p.cost, get_district_color(p.district), dist_name.to_string(), reason)
                                     }
                                     TileKind::Station(s) => {
-                                        let owned_st = st.stations_owned_by(me.id);
+                                        let owned_st = RulesEngine::stations_owned_by(&st, me.id);
                                         let next_rent = Money::from_vnd(250_000 * (1i64 << owned_st));
                                         (
                                             s.cost,
@@ -774,7 +748,7 @@ pub fn Board(
                                         )
                                     }
                                     TileKind::Utility(u) => {
-                                        let owned_ut = st.utilities_owned_by(me.id);
+                                        let owned_ut = RulesEngine::utilities_owned_by(&st, me.id);
                                         let mult = if owned_ut + 1 >= 2 { 10 } else { 4 };
                                         (
                                             u.cost,
@@ -815,7 +789,7 @@ pub fn Board(
                                                 </div>
                                                 <div class="stage-price-row">
                                                     <span style=format!("font-size: 18px; font-weight: 700; color: {};", TEXT_PRIMARY)>
-                                                        {tile.name.clone()}
+                                                        {LocaleCatalog::tile_name(loc, tile.index)}
                                                     </span>
                                                     <span class="mono" style=format!("font-size: 18px; font-weight: 700; color: {};", STATUS_SUCCESS)>
                                                         {cost.to_string()}
@@ -1162,11 +1136,11 @@ pub fn Board(
 
 
                 // 40 Board Tiles
-                {board.into_iter().map(|tile| {
+                {board.iter().map(|tile| {
                     let idx = tile.index;
                     let (rx, ry, w, h) = get_tile_rect(idx);
                     let is_corner = idx == 0 || idx == 10 || idx == 20 || idx == 30;
-                    let tile_kind = tile.kind.clone();
+                    let tile_kind = tile.kind;
 
                     let header_color = match &tile.kind {
                         TileKind::Property(p) => Some(get_district_color(p.district)),
@@ -1197,7 +1171,7 @@ pub fn Board(
                     };
 
                     let max_chars = if (idx > 10 && idx < 20) || idx > 30 { 14 } else { 13 };
-                    let name_lines = wrap_tile_name(&tile.name, max_chars);
+                    let name_lines = wrap_tile_name(tile.name, max_chars);
                     let line_count = name_lines.len();
                     let line_height = 13.0;
                     let start_y = if price_text.is_empty() {
@@ -1605,9 +1579,10 @@ pub fn Board(
             // Always-2D Selected Tile / Asset Deed / Chance & Community Chest Detail Card
             {move || {
                 let sel_idx = selected_tile.get()?;
-                let all_tiles = get_board();
-                let tile = all_tiles.get(sel_idx as usize)?.clone();
+                let all_tiles = BoardCatalog::all();
+                let tile = all_tiles.get(sel_idx as usize)?;
                 let st = state.get();
+                let loc = locale.get();
                 let prop_state = st.properties.get(sel_idx as usize).copied().unwrap_or_default();
 
                 let close_card = move || {
@@ -1617,7 +1592,7 @@ pub fn Board(
                 };
 
                 let (badge_color, category_label) = match &tile.kind {
-                    TileKind::Property(p) => (get_district_color(p.district), get_district_label(p.district).to_string()),
+                    TileKind::Property(p) => (get_district_color(p.district), LocaleCatalog::district_name(loc, p.district).to_string()),
                     TileKind::Station(_) => (TILE_STATION, "Bến xe & Nhà ga".to_string()),
                     TileKind::Utility(_) => (TILE_UTILITY, "Công trình công cộng".to_string()),
                     TileKind::Tax(_) => (TILE_TAX, "Thuế nhà nước".to_string()),
@@ -1716,7 +1691,7 @@ pub fn Board(
                         } else if let Some(owner_id) = prop_state.owner {
                             let rent = if prop_state.house_count > 0 {
                                 p.rent_table[prop_state.house_count as usize]
-                            } else if st.owns_full_district(owner_id, p.district) {
+                            } else if RulesEngine::owns_full_district(&st, owner_id, p.district) {
                                 Money(p.rent_table[0].0 * 2)
                             } else {
                                 p.rent_table[0]
@@ -1729,7 +1704,7 @@ pub fn Board(
                         let h_cnt = prop_state.house_count;
                         let is_full_set = prop_state
                             .owner
-                            .map(|oid| st.owns_full_district(oid, p.district))
+                            .map(|oid| RulesEngine::owns_full_district(&st, oid, p.district))
                             .unwrap_or(false);
 
                         view! {
@@ -1790,7 +1765,7 @@ pub fn Board(
                         }.into_view()
                     }
                     TileKind::Station(s) => {
-                        let owner_cnt = prop_state.owner.map(|oid| st.stations_owned_by(oid)).unwrap_or(0);
+                        let owner_cnt = prop_state.owner.map(|oid| RulesEngine::stations_owned_by(&st, oid)).unwrap_or(0);
                         let (primary_label, primary_val, primary_col) = if prop_state.is_mortgaged {
                             ("Trạng thái", "Đang thế chấp · 0 đ".to_string(), STATUS_WARNING)
                         } else if prop_state.owner.is_some() {
@@ -1833,7 +1808,7 @@ pub fn Board(
                         }.into_view()
                     }
                     TileKind::Utility(u) => {
-                        let owner_cnt = prop_state.owner.map(|oid| st.utilities_owned_by(oid)).unwrap_or(0);
+                        let owner_cnt = prop_state.owner.map(|oid| RulesEngine::utilities_owned_by(&st, oid)).unwrap_or(0);
                         let (primary_label, primary_val, primary_col) = if prop_state.is_mortgaged {
                             ("Trạng thái", "Đang thế chấp · 0 đ".to_string(), STATUS_WARNING)
                         } else if prop_state.owner.is_some() {
@@ -1896,28 +1871,22 @@ pub fn Board(
                     if let Some(me) = my_id.and_then(|id| st.find_player(id)) {
                         match &tile.kind {
                             TileKind::Property(p) => {
-                                let d_tiles = get_district_tiles(p.district);
-                                let full_set = st.owns_full_district(me.id, p.district);
+                                let d_tiles = BoardCatalog::district_tiles(p.district);
+                                let full_set = RulesEngine::owns_full_district(&st, me.id, p.district);
                                 let any_mortgaged = d_tiles.iter().any(|&t| st.properties[t as usize].is_mortgaged);
                                 let min_h = d_tiles.iter().map(|&t| st.properties[t as usize].house_count).min().unwrap_or(0);
-                                let max_h = d_tiles.iter().map(|&t| st.properties[t as usize].house_count).max().unwrap_or(0);
                                 let h_cnt = prop_state.house_count;
 
-                                let can_build = is_my_turn
-                                    && full_set
-                                    && !any_mortgaged
-                                    && h_cnt < 5
-                                    && h_cnt == min_h
-                                    && me.cash >= p.house_cost;
-                                let can_sell = is_my_turn && h_cnt > 0 && h_cnt == max_h;
-                                let can_mortgage = is_my_turn && !prop_state.is_mortgaged && max_h == 0;
+                                let can_build = is_my_turn && RulesEngine::can_build_house(&st, me.id, sel_idx);
+                                let can_sell = is_my_turn && RulesEngine::can_sell_house(&st, me.id, sel_idx);
+                                let can_mortgage = is_my_turn && RulesEngine::can_mortgage(&st, me.id, sel_idx);
                                 let unmortgage_cost = Money((p.mortgage_value.0 * 11) / 10);
-                                let can_unmortgage = is_my_turn && prop_state.is_mortgaged && me.cash >= unmortgage_cost;
+                                let can_unmortgage = is_my_turn && RulesEngine::can_unmortgage(&st, me.id, sel_idx);
 
                                 let hint = if !is_my_turn {
                                     Some("Chỉ thao tác được trong lượt của bạn".to_string())
                                 } else if !full_set {
-                                    Some(format!("Cần độc quyền {} để xây nhà", get_district_label(p.district)))
+                                    Some(format!("Cần độc quyền {} để xây nhà", LocaleCatalog::district_name(loc, p.district)))
                                 } else if any_mortgaged {
                                     Some("Cần chuộc lại các ô thế chấp trong quận trước khi xây".to_string())
                                 } else if h_cnt >= 5 {
@@ -2115,7 +2084,7 @@ pub fn Board(
                                         {format!("Ô #{:02} · {}", tile.index, category_label)}
                                     </span>
                                     <h3 style=format!("font-size: 20px; line-height: 26px; font-weight: 700; color: {};", TEXT_ON_ACCENT)>
-                                        {tile.name.clone()}
+                                        {LocaleCatalog::tile_name(loc, tile.index)}
                                     </h3>
                                 </div>
                                 <button
@@ -2181,19 +2150,6 @@ mod tests {
     }
 
     #[test]
-    fn test_svg_die_pips_centered_counts_and_colors() {
-        for val in 1..=6u8 {
-            let pips = svg_die_pips_centered(val);
-            assert_eq!(pips.len(), val as usize);
-            for (px, py, is_red) in pips {
-                assert!((-16.0..=16.0).contains(&px));
-                assert!((-16.0..=16.0).contains(&py));
-                assert_eq!(is_red, val == 1 || val == 4);
-            }
-        }
-    }
-
-    #[test]
     fn test_die_3d_settled_transforms_and_pip_masks() {
         for val in 1..=6u8 {
             let mask = die_face_pip_mask(val);
@@ -2208,8 +2164,8 @@ mod tests {
 
     #[test]
     fn test_wrap_tile_name_splits_all_board_names_cleanly() {
-        for tile in get_board() {
-            let lines = wrap_tile_name(&tile.name, 13);
+        for tile in BoardCatalog::all() {
+            let lines = wrap_tile_name(tile.name, 13);
             assert!(!lines.is_empty());
             assert!(
                 lines.len() <= 3,

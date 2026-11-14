@@ -1,7 +1,9 @@
-use crate::board::{get_board, TileKind};
+use crate::board::{BoardCatalog, TileKind};
 use crate::cards::{get_chance_deck, get_community_chest_deck, Card};
-use crate::money::Money;
-use monopoly_proto::{PlayerId, SessionToken};
+use monopoly_proto::{
+    Money, PlayerId, PublicAuctionView, PublicGameConfig, PublicGameView, PublicPlayerView,
+    PublicPropertyView, PublicTurnPhase, SessionToken,
+};
 use serde::{Deserialize, Serialize};
 
 pub const STARTING_CASH_VND: i64 = 15_000_000;
@@ -67,11 +69,17 @@ fn default_max_players() -> u8 {
     4
 }
 
+fn default_turn_time_limit() -> u32 {
+    120
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameConfig {
     pub enable_auction: bool,
     #[serde(default = "default_max_players")]
     pub max_players: u8,
+    #[serde(default = "default_turn_time_limit")]
+    pub turn_time_limit_seconds: u32,
 }
 
 impl Default for GameConfig {
@@ -79,6 +87,7 @@ impl Default for GameConfig {
         Self {
             enable_auction: true,
             max_players: 4,
+            turn_time_limit_seconds: 120,
         }
     }
 }
@@ -91,9 +100,19 @@ pub enum TurnPhase {
     TurnEnded,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+impl From<TurnPhase> for PublicTurnPhase {
+    fn from(value: TurnPhase) -> Self {
+        match value {
+            TurnPhase::WaitingForRoll => PublicTurnPhase::WaitingForRoll,
+            TurnPhase::TileActionPending => PublicTurnPhase::TileActionPending,
+            TurnPhase::Auction => PublicTurnPhase::Auction,
+            TurnPhase::TurnEnded => PublicTurnPhase::TurnEnded,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct GameState {
-    #[serde(default)]
     pub config: GameConfig,
     pub players: Vec<PlayerState>,
     pub turn_order: Vec<PlayerId>,
@@ -199,13 +218,62 @@ impl GameState {
     }
 
     pub fn is_tile_purchasable(&self, tile_index: u8) -> bool {
-        let board = get_board();
-        let tile = &board[tile_index as usize];
+        let tile = BoardCatalog::tile(tile_index);
         match &tile.kind {
             TileKind::Property(_) | TileKind::Station(_) | TileKind::Utility(_) => {
                 self.properties[tile_index as usize].owner.is_none()
             }
             _ => false,
+        }
+    }
+
+    pub fn to_public_view(&self) -> PublicGameView {
+        PublicGameView {
+            config: PublicGameConfig {
+                enable_auction: self.config.enable_auction,
+                max_players: self.config.max_players,
+                turn_time_limit_seconds: self.config.turn_time_limit_seconds,
+            },
+            players: self
+                .players
+                .iter()
+                .map(|p| PublicPlayerView {
+                    id: p.id,
+                    name: p.name.clone(),
+                    seat_index: p.seat_index,
+                    cash: p.cash,
+                    position: p.position,
+                    in_jail: p.in_jail,
+                    turns_in_jail: p.turns_in_jail,
+                    get_out_of_jail_cards: p.get_out_of_jail_cards,
+                    is_bankrupt: p.is_bankrupt,
+                    is_connected: p.is_connected,
+                    is_bot_controlled: p.is_bot_controlled,
+                })
+                .collect(),
+            turn_order: self.turn_order.clone(),
+            current_player_index: self.current_player_index,
+            properties: self
+                .properties
+                .iter()
+                .map(|prop| PublicPropertyView {
+                    owner: prop.owner,
+                    house_count: prop.house_count,
+                    is_mortgaged: prop.is_mortgaged,
+                })
+                .collect(),
+            turn_phase: self.turn_phase.into(),
+            doubles_count: self.doubles_count,
+            last_dice: self.last_dice,
+            auction: self.auction.as_ref().map(|a| PublicAuctionView {
+                tile_index: a.tile_index,
+                current_bid: a.current_bid,
+                highest_bidder: a.highest_bidder,
+                active_bidders: a.active_bidders.clone(),
+            }),
+            is_game_started: self.is_game_started,
+            is_game_over: self.is_game_over,
+            winner: self.winner,
         }
     }
 }

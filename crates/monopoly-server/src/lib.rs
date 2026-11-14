@@ -1,6 +1,6 @@
-pub mod bot;
+pub mod registry;
 pub mod room;
 pub mod router;
-pub mod timer;
 
+pub use registry::LobbyRegistry;
 pub use router::{create_router, AppState};

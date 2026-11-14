@@ -1,16 +1,20 @@
-use crate::components::board::{Board, BoardFloatingPopup, PlayerAvatar};
+﻿use crate::components::board::{Board, BoardFloatingPopup, PlayerAvatar};
 use crate::components::log::LogFeed;
+use crate::i18n::LocaleCatalog;
 use crate::palette::{
     get_district_color, ACCENT_PRIMARY, BG_SECONDARY, BORDER_DEFAULT, STATUS_DANGER,
     STATUS_SUCCESS, STATUS_WARNING, SURFACE_HOVER, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
 };
+use crate::store::{empty_public_view, push_bounded_log, AnimationQueue};
 use crate::ws::{get_storage_session_token, save_storage_session_token, WsClient};
 use leptos::*;
-use monopoly_core::board::{get_board, District, TileKind};
-use monopoly_core::money::Money;
-use monopoly_core::rules::apply_action;
+use monopoly_core::board::{BoardCatalog, District, TileKind};
+use monopoly_core::bot::BotPolicy;
+use monopoly_core::rules::{apply_action, RulesEngine};
 use monopoly_core::state::{GameState, PlayerState, TurnPhase};
-use monopoly_proto::{ClientMessage, PlayerId, ServerMessage};
+use monopoly_proto::{
+    ClientMessage, DeckId, Locale, Money, PlayerId, PublicGameView, PublicTurnPhase, ServerMessage,
+};
 use std::rc::Rc;
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
@@ -107,70 +111,6 @@ pub struct LocalPlayerSlot {
     pub is_bot: bool,
 }
 
-fn decide_local_bot_action(state: &GameState, player_id: PlayerId) -> Option<ClientMessage> {
-    let player = state.find_player(player_id)?;
-    if player.is_bankrupt {
-        return None;
-    }
-
-    match state.turn_phase {
-        TurnPhase::WaitingForRoll => {
-            if player.in_jail {
-                if player.get_out_of_jail_cards > 0 {
-                    Some(ClientMessage::UseJailCard)
-                } else if player.cash > Money::from_vnd(5_000_000) {
-                    Some(ClientMessage::PayJailBail)
-                } else {
-                    Some(ClientMessage::RollDice)
-                }
-            } else {
-                Some(ClientMessage::RollDice)
-            }
-        }
-        TurnPhase::TileActionPending => {
-            let pos = player.position as usize;
-            let board = get_board();
-            let tile = &board[pos];
-            let cost = match &tile.kind {
-                TileKind::Property(p) => p.cost,
-                TileKind::Station(s) => s.cost,
-                TileKind::Utility(u) => u.cost,
-                _ => Money::ZERO,
-            };
-
-            if cost > Money::ZERO && player.cash >= Money(cost.0 * 2) {
-                Some(ClientMessage::BuyProperty)
-            } else {
-                Some(ClientMessage::DeclineProperty)
-            }
-        }
-        TurnPhase::Auction => {
-            let auction = state.auction.as_ref()?;
-            let board = get_board();
-            let tile = &board[auction.tile_index as usize];
-            let cost = match &tile.kind {
-                TileKind::Property(p) => p.cost,
-                TileKind::Station(s) => s.cost,
-                TileKind::Utility(u) => u.cost,
-                _ => Money::ZERO,
-            };
-
-            let half_cost = Money(cost.0 / 2);
-            let next_bid = auction.current_bid + Money::from_vnd(50_000);
-
-            if auction.current_bid < half_cost
-                && player.cash >= Money(auction.current_bid.0 * 3)
-                && player.cash >= next_bid
-            {
-                Some(ClientMessage::PlaceBid { amount: next_bid })
-            } else {
-                Some(ClientMessage::PassAuction)
-            }
-        }
-        TurnPhase::TurnEnded => Some(ClientMessage::EndTurn),
-    }
-}
-
 type DeferredTask = std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce()>>>>;
 
 fn schedule_when_animation_done(
@@ -246,8 +186,8 @@ fn execute_local_action(
             for ev in events {
                 on_msg.call(ev);
             }
-            on_msg.call(ServerMessage::SyncSnapshot {
-                state: serde_json::to_value(&new_state).unwrap_or_default(),
+            on_msg.call(ServerMessage::SyncView {
+                view: new_state.to_public_view(),
             });
 
             if new_state.is_game_over {
@@ -343,7 +283,7 @@ fn execute_local_action(
                         if st.is_game_over {
                             return;
                         }
-                        if let Some(bot_action) = decide_local_bot_action(&st, bot_id) {
+                        if let Some(bot_action) = BotPolicy::decide_action_state(&st, bot_id) {
                             execute_local_action(
                                 bot_id,
                                 bot_action,
@@ -362,7 +302,7 @@ fn execute_local_action(
         }
         Err(e) => {
             on_msg.call(ServerMessage::ActionRejected {
-                reason: e.to_string(),
+                reason: e.to_message_key(),
             });
         }
     }
@@ -405,7 +345,7 @@ pub fn App() -> impl IntoView {
     let (online_bot_count, set_online_bot_count) = create_signal(1u8);
     let (pending_host_setup, set_pending_host_setup) =
         create_signal::<Option<(bool, u8, u8)>>(None);
-    let (game_state, set_game_state) = create_signal(GameState::new());
+    let (game_state, set_game_state) = create_signal(empty_public_view());
     let (my_player_id, set_my_player_id) = create_signal::<Option<PlayerId>>(None);
     let (timer_seconds, set_timer_seconds) = create_signal(120u32);
     let (logs, set_logs) = create_signal(vec!["Phiên bàn cờ đã sẵn sàng".to_string()]);
@@ -414,6 +354,8 @@ pub fn App() -> impl IntoView {
     let (selected_tile, set_selected_tile) = create_signal::<Option<u8>>(None);
     let (sound_muted, set_sound_muted) = create_signal(false);
     let (ui_template, set_ui_template) = create_signal(load_ui_template());
+    let (locale, set_locale) = create_signal(Locale::Vi);
+    let anim_queue = AnimationQueue::new();
 
     create_effect(move |_| {
         let tpl = ui_template.get();
@@ -436,18 +378,18 @@ pub fn App() -> impl IntoView {
     let (popup_seq, set_popup_seq) = create_signal(1u64);
     let (cash_delta_badge, set_cash_delta_badge) = create_signal::<Option<(String, bool)>>(None);
     let (drawn_card_banner, set_drawn_card_banner) =
-        create_signal::<Option<(String, String, String)>>(None);
+        create_signal::<Option<(DeckId, String, String)>>(None);
     let (card_banner_seq, set_card_banner_seq) = create_signal(0u64);
 
     // Buffered state/card while dice tumble & pawn hops so UI updates right when landing
-    let (pending_snapshot, set_pending_snapshot) = create_signal::<Option<GameState>>(None);
-    let (pending_card, set_pending_card) = create_signal::<Option<(String, String, String)>>(None);
+    let (pending_snapshot, set_pending_snapshot) = create_signal::<Option<PublicGameView>>(None);
+    let (pending_card, set_pending_card) = create_signal::<Option<(DeckId, String, String)>>(None);
 
     let (ws_client, set_ws_client) = create_signal::<Option<Rc<WsClient>>>(None);
     let (error_toast, set_error_toast) = create_signal::<Option<String>>(None);
 
     let add_log = move |msg: String| {
-        set_logs.update(|l| l.push(msg));
+        push_bounded_log(set_logs, msg);
     };
 
     let spawn_board_popup = move |tile_index: u8, text: String, is_positive: bool| {
@@ -471,7 +413,7 @@ pub fn App() -> impl IntoView {
         );
     };
 
-    let commit_snapshot = move |new_state: GameState| {
+    let commit_snapshot = move |new_state: PublicGameView| {
         if let Some(my_id) = my_player_id.get_untracked() {
             let old_cash = game_state
                 .get_untracked()
@@ -499,7 +441,7 @@ pub fn App() -> impl IntoView {
         set_game_state.set(new_state);
     };
 
-    let show_drawn_card_banner = move |card_tuple: (String, String, String)| {
+    let show_drawn_card_banner = move |card_tuple: (DeckId, String, String)| {
         let next_seq = card_banner_seq.get_untracked().wrapping_add(1);
         set_card_banner_seq.set(next_seq);
         set_drawn_card_banner.set(Some(card_tuple));
@@ -752,9 +694,9 @@ pub fn App() -> impl IntoView {
                                             }
                                         }
                                     } else {
-                                        if let Some(TileKind::Tax(t)) = get_board()
+                                        if let Some(TileKind::Tax(t)) = BoardCatalog::all()
                                             .get(intermediate_tile as usize)
-                                            .map(|tile| tile.kind.clone())
+                                            .map(|tile| tile.kind)
                                         {
                                             spawn_board_popup(
                                                 intermediate_tile,
@@ -885,16 +827,18 @@ pub fn App() -> impl IntoView {
         ServerMessage::CardDrawn {
             player_id: _,
             deck,
-            description,
-            effect_summary,
+            card_id,
         } => {
-            let card_tuple = (deck.clone(), description.clone(), effect_summary.clone());
+            let loc = locale.get_untracked();
+            let (title, desc) = LocaleCatalog::card_text(loc, card_id);
+            let deck_name = LocaleCatalog::deck_name(loc, deck);
+            let card_tuple = (deck, title.to_string(), desc.to_string());
             if is_rolling.get_untracked() || is_animating_move.get_untracked() {
                 set_pending_card.set(Some(card_tuple));
             } else {
                 show_drawn_card_banner(card_tuple);
             }
-            add_log(format!("[{}] {}: {}", deck, description, effect_summary));
+            add_log(format!("[{}] {}: {}", deck_name, title, desc));
         }
         ServerMessage::BotAssumedControl { player_id, reason } => {
             let name = game_state
@@ -902,32 +846,32 @@ pub fn App() -> impl IntoView {
                 .find_player(player_id)
                 .map(|p| p.name.clone())
                 .unwrap_or_default();
+            let reason_text = LocaleCatalog::message(locale.get_untracked(), &reason);
             add_log(format!(
                 "Hệ thống tự động đi thay lượt của {} ({})",
-                name, reason
+                name, reason_text
             ));
         }
-        ServerMessage::SyncSnapshot { state } => {
-            if let Ok(parsed) = serde_json::from_value::<GameState>(state) {
-                if is_rolling.get_untracked() || is_animating_move.get_untracked() {
-                    set_pending_snapshot.set(Some(parsed));
-                } else {
-                    let mut pos_arr = visual_positions.get_untracked();
-                    for (i, p) in parsed.players.iter().enumerate().take(4) {
-                        pos_arr[i] = p.position;
-                    }
-                    set_visual_positions.set(pos_arr);
-                    set_display_dice.set(parsed.last_dice);
-                    commit_snapshot(parsed);
+        ServerMessage::SyncView { view } => {
+            if is_rolling.get_untracked() || is_animating_move.get_untracked() {
+                set_pending_snapshot.set(Some(view));
+            } else {
+                let mut pos_arr = visual_positions.get_untracked();
+                for (i, p) in view.players.iter().enumerate().take(4) {
+                    pos_arr[i] = p.position;
                 }
+                set_visual_positions.set(pos_arr);
+                set_display_dice.set(view.last_dice);
+                commit_snapshot(view);
             }
         }
         ServerMessage::ActionRejected { reason } => {
             set_is_rolling.set(false);
             set_is_animating_move.set(false);
             set_hopping_seat.set(None);
-            set_error_toast.set(Some(reason.clone()));
-            add_log(format!("Thao tác bị từ chối: {}", reason));
+            let reason_text = LocaleCatalog::message(locale.get_untracked(), &reason);
+            set_error_toast.set(Some(reason_text.clone()));
+            add_log(format!("Thao tác bị từ chối: {}", reason_text));
         }
         ServerMessage::PlayerBankrupt { player_id } => {
             let name = game_state
@@ -941,6 +885,7 @@ pub fn App() -> impl IntoView {
     });
 
     let start_local_game_custom = move |slots: Vec<LocalPlayerSlot>| {
+        anim_queue.cancel_all();
         set_ws_client.set(None);
         set_is_local_mode.set(true);
         set_selected_tile.set(None);
@@ -1018,7 +963,7 @@ pub fn App() -> impl IntoView {
 
         set_my_player_id.set(first_human_id);
         set_local_authoritative_state.set(st.clone());
-        set_game_state.set(st);
+        set_game_state.set(st.to_public_view());
         set_view_mode.set(ViewMode::Game);
     };
 
@@ -1151,10 +1096,10 @@ pub fn App() -> impl IntoView {
 
         if is_local_mode.get_untracked() {
             match cur.turn_phase {
-                TurnPhase::WaitingForRoll => {
+                PublicTurnPhase::WaitingForRoll => {
                     handle_action.call(ClientMessage::RollDice);
                 }
-                TurnPhase::TileActionPending => {
+                PublicTurnPhase::TileActionPending => {
                     if cur.players.len() == 1 {
                         handle_action.call(ClientMessage::DeclineProperty);
                         handle_action.call(ClientMessage::RollDice);
@@ -1162,18 +1107,18 @@ pub fn App() -> impl IntoView {
                         handle_action.call(ClientMessage::DeclineProperty);
                     }
                 }
-                TurnPhase::TurnEnded => {
+                PublicTurnPhase::TurnEnded => {
                     handle_action.call(ClientMessage::EndTurn);
                     if cur.players.len() == 1 {
                         handle_action.call(ClientMessage::RollDice);
                     }
                 }
-                TurnPhase::Auction => {}
+                PublicTurnPhase::Auction => {}
             }
         } else {
             match cur.turn_phase {
-                TurnPhase::WaitingForRoll => handle_action.call(ClientMessage::RollDice),
-                TurnPhase::TurnEnded => handle_action.call(ClientMessage::EndTurn),
+                PublicTurnPhase::WaitingForRoll => handle_action.call(ClientMessage::RollDice),
+                PublicTurnPhase::TurnEnded => handle_action.call(ClientMessage::EndTurn),
                 _ => {}
             }
         }
@@ -1205,7 +1150,7 @@ pub fn App() -> impl IntoView {
                 && !st.is_game_over
                 && !is_rolling.get_untracked()
                 && !is_animating_move.get_untracked()
-                && st.turn_phase == TurnPhase::WaitingForRoll
+                && st.turn_phase == PublicTurnPhase::WaitingForRoll
             {
                 ev.prevent_default();
                 trigger_roll_dice.call(());
@@ -1342,10 +1287,31 @@ pub fn App() -> impl IntoView {
                                 <button
                                     class="btn-outline"
                                     style=format!(
+                                        "font-size: 12px; line-height: 16px; height: 32px; background: {}; color: {}; border: 1px solid {}; padding: 0 10px; border-radius: 8px; font-weight: 600; cursor: pointer;",
+                                        BG_SECONDARY, TEXT_SECONDARY, BORDER_DEFAULT
+                                    )
+                                    on:click=move |_| {
+                                        set_locale.update(|l| {
+                                            *l = match *l {
+                                                Locale::Vi => Locale::En,
+                                                Locale::En => Locale::Vi,
+                                            };
+                                        });
+                                    }
+                                >
+                                    {move || match locale.get() {
+                                        Locale::Vi => "VI",
+                                        Locale::En => "EN",
+                                    }}
+                                </button>
+                                <button
+                                    class="btn-outline"
+                                    style=format!(
                                         "font-size: 12px; line-height: 16px; height: 32px; background: {}; color: {}; border: 1px solid {}; padding: 0 10px; border-radius: 8px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;",
                                         BG_SECONDARY, TEXT_SECONDARY, BORDER_DEFAULT
                                     )
                                     on:click=move |_| {
+                                        anim_queue.cancel_all();
                                         set_show_history.set(false);
                                         set_is_local_mode.set(false);
                                         set_my_player_id.set(None);
@@ -1820,7 +1786,7 @@ pub fn App() -> impl IntoView {
                                     }
                                     let cur_id = st.current_player().map(|p| p.id);
                                     let my_id = my_player_id.get();
-                                    let board_tiles = get_board();
+                                    let board_tiles = BoardCatalog::all();
                                     let all_districts = [
                                         District::District4,
                                         District::District8,
@@ -1863,7 +1829,7 @@ pub fn App() -> impl IntoView {
                                                                 && st.properties[t.index as usize].owner == Some(p.id)
                                                         });
                                                         if has_any {
-                                                            Some((d, st.owns_full_district(p.id, d)))
+                                                            Some((d, RulesEngine::owns_full_district(&st, p.id, d)))
                                                         } else {
                                                             None
                                                         }
@@ -1910,6 +1876,7 @@ pub fn App() -> impl IntoView {
 
                                 <Board
                                     state=game_state
+                                    locale=locale
                                     selected_tile=selected_tile
                                     is_rolling=is_rolling
                                     is_animating_move=is_animating_move
@@ -2066,7 +2033,7 @@ pub fn App() -> impl IntoView {
 
                                         let mut context_buttons: Vec<View> = Vec::new();
 
-                                        if !busy && st.turn_phase == TurnPhase::Auction {
+                                        if !busy && st.turn_phase == PublicTurnPhase::Auction {
                                             if let (Some(me), Some(auc)) = (me_opt, st.auction.as_ref()) {
                                                 let next_bid = auc.current_bid + Money::from_vnd(50_000);
                                                 let is_active = auc.active_bidders.contains(&me.id);
@@ -2099,9 +2066,9 @@ pub fn App() -> impl IntoView {
                                             }
                                         } else if !busy && is_my_turn {
                                             match st.turn_phase {
-                                                TurnPhase::TileActionPending => {
+                                                PublicTurnPhase::TileActionPending => {
                                                     if let Some(me) = me_opt {
-                                                        let board = get_board();
+                                                        let board = BoardCatalog::all();
                                                         let tile = &board[me.position as usize];
                                                         let cost = match &tile.kind {
                                                             TileKind::Property(p) => p.cost,
@@ -2128,7 +2095,7 @@ pub fn App() -> impl IntoView {
                                                         }.into_view());
                                                     }
                                                 }
-                                                TurnPhase::WaitingForRoll => {
+                                                PublicTurnPhase::WaitingForRoll => {
                                                     if let Some(me) = me_opt {
                                                         if me.in_jail {
                                                             let can_bail = me.cash >= Money::from_vnd(500_000);
@@ -2154,8 +2121,8 @@ pub fn App() -> impl IntoView {
                                                         }
                                                     }
                                                 }
-                                                TurnPhase::Auction => {}
-                                                TurnPhase::TurnEnded => {
+                                                PublicTurnPhase::Auction => {}
+                                                PublicTurnPhase::TurnEnded => {
                                                     if !local_mode {
                                                         context_buttons.push(view! {
                                                             <button
@@ -2202,12 +2169,12 @@ pub fn App() -> impl IntoView {
 
                                         let roll_disabled = busy
                                             || !is_my_turn
-                                            || st.turn_phase == TurnPhase::Auction
-                                            || (st.turn_phase == TurnPhase::TileActionPending
+                                            || st.turn_phase == PublicTurnPhase::Auction
+                                            || (st.turn_phase == PublicTurnPhase::TileActionPending
                                                 && (!local_mode
                                                     || (st.players.len() > 1
                                                         && st.config.enable_auction)))
-                                            || (st.turn_phase == TurnPhase::TurnEnded && !local_mode);
+                                            || (st.turn_phase == PublicTurnPhase::TurnEnded && !local_mode);
 
                                         let roll_label = if is_rolling.get() {
                                             "Đang lắc...".to_string()

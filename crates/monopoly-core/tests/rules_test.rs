@@ -2,10 +2,9 @@ mod helpers;
 
 use helpers::{create_seeded_rng, create_test_game};
 use monopoly_core::board::District;
-use monopoly_core::money::Money;
 use monopoly_core::rules::{apply_action, handle_bankruptcy};
 use monopoly_core::state::{TurnPhase, PASS_GO_REWARD_VND};
-use monopoly_proto::{ClientMessage, ServerMessage};
+use monopoly_proto::{ClientMessage, Money, ServerMessage};
 use rand::Rng;
 
 #[test]
@@ -326,4 +325,86 @@ fn test_decline_property_respects_auction_config_option() {
     assert_eq!(state_declined.turn_phase, TurnPhase::TurnEnded);
     assert!(state_declined.auction.is_none());
     assert!(events_declined.is_empty());
+}
+
+#[test]
+fn test_build_sell_mortgage_and_rules_engine_queries() {
+    let (mut state, _) = create_test_game();
+    let p1_id = state.turn_order[0];
+    let mut rng = create_seeded_rng(42);
+
+    // Give p1 full District 4 (tiles 1 and 3)
+    state.properties[1].owner = Some(p1_id);
+    state.properties[3].owner = Some(p1_id);
+    state.find_player_mut(p1_id).unwrap().cash = Money::from_vnd(10_000_000);
+
+    let view = state.to_public_view();
+    assert!(monopoly_core::rules::RulesEngine::can_build_house(&view, p1_id, 1));
+    assert!(!monopoly_core::rules::RulesEngine::can_sell_house(&view, p1_id, 1));
+    assert!(monopoly_core::rules::RulesEngine::can_mortgage(&view, p1_id, 1));
+    assert_eq!(
+        monopoly_core::rules::RulesEngine::tile_rent_preview(&view, 1),
+        Money::from_vnd(40_000) // doubled base rent for monopoly
+    );
+
+    // Build on tile 1; must build evenly so cannot build 2nd house on tile 1 before tile 3
+    let (state, _) = apply_action(
+        &state,
+        p1_id,
+        &ClientMessage::BuildHouse { tile_index: 1 },
+        &mut rng,
+    )
+    .unwrap();
+    let view = state.to_public_view();
+    assert!(!monopoly_core::rules::RulesEngine::can_build_house(&view, p1_id, 1));
+    assert!(monopoly_core::rules::RulesEngine::can_build_house(&view, p1_id, 3));
+    assert!(!monopoly_core::rules::RulesEngine::can_mortgage(&view, p1_id, 3));
+    assert!(monopoly_core::rules::RulesEngine::can_sell_house(&view, p1_id, 1));
+
+    // Sell house back, then mortgage & unmortgage
+    let (state, _) = apply_action(
+        &state,
+        p1_id,
+        &ClientMessage::SellHouse { tile_index: 1 },
+        &mut rng,
+    )
+    .unwrap();
+    assert_eq!(state.properties[1].house_count, 0);
+
+    let (state, _) = apply_action(
+        &state,
+        p1_id,
+        &ClientMessage::MortgageProperty { tile_index: 1 },
+        &mut rng,
+    )
+    .unwrap();
+    assert!(state.properties[1].is_mortgaged);
+    let view = state.to_public_view();
+    assert!(monopoly_core::rules::RulesEngine::can_unmortgage(&view, p1_id, 1));
+
+    let (state, _) = apply_action(
+        &state,
+        p1_id,
+        &ClientMessage::UnmortgageProperty { tile_index: 1 },
+        &mut rng,
+    )
+    .unwrap();
+    assert!(!state.properties[1].is_mortgaged);
+}
+
+#[test]
+fn test_bot_policy_and_public_view_omits_secrets() {
+    let (mut state, _) = create_test_game();
+    let p1_id = state.turn_order[0];
+    state.turn_phase = TurnPhase::TileActionPending;
+    state.find_player_mut(p1_id).unwrap().position = 1;
+    state.find_player_mut(p1_id).unwrap().cash = Money::from_vnd(5_000_000);
+
+    let view = state.to_public_view();
+    let serialized = serde_json::to_string(&view).unwrap();
+    assert!(!serialized.contains("session_token"));
+    assert!(!serialized.contains("chance_deck"));
+
+    let action = monopoly_core::bot::BotPolicy::decide_action(&view, p1_id);
+    assert_eq!(action, Some(ClientMessage::BuyProperty));
 }

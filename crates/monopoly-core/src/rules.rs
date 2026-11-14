@@ -1,8 +1,9 @@
-use crate::board::{get_board, get_district_tiles, TileKind};
+﻿use crate::board::{BoardCatalog, TileKind};
 use crate::cards::CardEffect;
-use crate::money::Money;
 use crate::state::{GameState, TurnPhase, JAIL_BAIL_VND, PASS_GO_REWARD_VND};
-use monopoly_proto::{ClientMessage, PlayerId, ServerMessage};
+use monopoly_proto::{
+    CardId, ClientMessage, MessageKey, Money, PlayerId, PublicGameView, ServerMessage,
+};
 use rand::Rng;
 use thiserror::Error;
 
@@ -57,6 +58,236 @@ pub enum GameRuleError {
     BidTooLow { bid: Money, current: Money },
     #[error("Invalid action: {0}")]
     InvalidAction(String),
+}
+
+impl GameRuleError {
+    pub fn to_message_key(&self) -> MessageKey {
+        match self {
+            GameRuleError::GameNotStarted => MessageKey::GameNotStarted,
+            GameRuleError::GameOver => MessageKey::GameAlreadyOver,
+            GameRuleError::NotCurrentPlayer(_) => MessageKey::NotYourTurn,
+            GameRuleError::InvalidPhase { .. } => MessageKey::InvalidPhase,
+            GameRuleError::PlayerBankrupt(_) => MessageKey::NotYourTurn,
+            GameRuleError::PlayerInJail(_) => MessageKey::InvalidPhase,
+            GameRuleError::PlayerNotInJail(_) => MessageKey::NotInJail,
+            GameRuleError::NoJailCard => MessageKey::NoJailCard,
+            GameRuleError::InsufficientFunds { .. } => MessageKey::InsufficientFunds,
+            GameRuleError::TileNotPurchasable(_) => MessageKey::PropertyNotPurchasable,
+            GameRuleError::TileAlreadyOwned(_) => MessageKey::PropertyAlreadyOwned,
+            GameRuleError::NotPropertyOwner(_) => MessageKey::NotYourTurn,
+            GameRuleError::MustOwnMonopolyToBuild => MessageKey::MustOwnFullDistrict,
+            GameRuleError::DistrictHasMortgage => MessageKey::PropertyMortgaged,
+            GameRuleError::MaxHousesReached => MessageKey::MaxHousesReached,
+            GameRuleError::UnevenBuilding => MessageKey::MustBuildEvenly,
+            GameRuleError::NoHousesToSell(_) => MessageKey::NoHousesToSell,
+            GameRuleError::PropertyAlreadyMortgaged(_) => MessageKey::PropertyMortgaged,
+            GameRuleError::PropertyNotMortgaged(_) => MessageKey::PropertyNotMortgaged,
+            GameRuleError::PropertyHasBuildings(_) => MessageKey::CannotMortgageWithBuildings,
+            GameRuleError::NotInAuction => MessageKey::AuctionNotActive,
+            GameRuleError::BidTooLow { .. } => MessageKey::BidTooLow,
+            GameRuleError::InvalidAction(_) => MessageKey::InvalidPhase,
+        }
+    }
+}
+
+pub struct RulesEngine;
+
+impl RulesEngine {
+    pub fn stations_owned_by(view: &PublicGameView, player_id: PlayerId) -> usize {
+        [5usize, 15, 25, 35]
+            .iter()
+            .filter(|&&idx| {
+                view.properties
+                    .get(idx)
+                    .is_some_and(|p| p.owner == Some(player_id) && !p.is_mortgaged)
+            })
+            .count()
+    }
+
+    pub fn utilities_owned_by(view: &PublicGameView, player_id: PlayerId) -> usize {
+        [12usize, 28]
+            .iter()
+            .filter(|&&idx| {
+                view.properties
+                    .get(idx)
+                    .is_some_and(|p| p.owner == Some(player_id) && !p.is_mortgaged)
+            })
+            .count()
+    }
+
+    pub fn owns_full_district(
+        view: &PublicGameView,
+        player_id: PlayerId,
+        district: crate::board::District,
+    ) -> bool {
+        BoardCatalog::district_tiles(district).iter().all(|&idx| {
+            view.properties
+                .get(idx as usize)
+                .is_some_and(|p| p.owner == Some(player_id) && !p.is_mortgaged)
+        })
+    }
+
+    /// Computes the current rent for a tile given the public game view.
+    pub fn tile_rent_preview(view: &PublicGameView, tile_index: u8) -> Money {
+        let Some(prop) = view.properties.get(tile_index as usize) else {
+            return Money::ZERO;
+        };
+        let Some(owner) = prop.owner else {
+            return Money::ZERO;
+        };
+        if prop.is_mortgaged {
+            return Money::ZERO;
+        }
+        let tile = BoardCatalog::tile(tile_index);
+        match &tile.kind {
+            TileKind::Property(def) => {
+                if prop.house_count == 0 {
+                    let district_tiles = BoardCatalog::district_tiles(def.district);
+                    let owns_all = district_tiles.iter().all(|&idx| {
+                        view.properties
+                            .get(idx as usize)
+                            .is_some_and(|p| p.owner == Some(owner) && !p.is_mortgaged)
+                    });
+                    if owns_all {
+                        Money(def.rent_table[0].0 * 2)
+                    } else {
+                        def.rent_table[0]
+                    }
+                } else {
+                    def.rent_table[prop.house_count.min(5) as usize]
+                }
+            }
+            TileKind::Station(_) => {
+                let count = [5usize, 15, 25, 35]
+                    .iter()
+                    .filter(|&&idx| {
+                        view.properties
+                            .get(idx)
+                            .is_some_and(|p| p.owner == Some(owner) && !p.is_mortgaged)
+                    })
+                    .count();
+                match count {
+                    1 => Money::from_vnd(250_000),
+                    2 => Money::from_vnd(500_000),
+                    3 => Money::from_vnd(1_000_000),
+                    4 => Money::from_vnd(2_000_000),
+                    _ => Money::ZERO,
+                }
+            }
+            TileKind::Utility(_) => {
+                let count = [12usize, 28]
+                    .iter()
+                    .filter(|&&idx| {
+                        view.properties
+                            .get(idx)
+                            .is_some_and(|p| p.owner == Some(owner) && !p.is_mortgaged)
+                    })
+                    .count();
+                let dice_sum = (view.last_dice.0 + view.last_dice.1).max(2) as i64;
+                if count >= 2 {
+                    Money::from_vnd(dice_sum * 100_000)
+                } else if count == 1 {
+                    Money::from_vnd(dice_sum * 40_000)
+                } else {
+                    Money::ZERO
+                }
+            }
+            _ => Money::ZERO,
+        }
+    }
+
+    pub fn can_build_house(view: &PublicGameView, player_id: PlayerId, tile_index: u8) -> bool {
+        let Some(player) = view.find_player(player_id) else {
+            return false;
+        };
+        let Some(prop) = view.properties.get(tile_index as usize) else {
+            return false;
+        };
+        if prop.owner != Some(player_id) || prop.is_mortgaged || prop.house_count >= 5 {
+            return false;
+        }
+        let TileKind::Property(def) = &BoardCatalog::tile(tile_index).kind else {
+            return false;
+        };
+        if player.cash < def.house_cost {
+            return false;
+        }
+        let district_tiles = BoardCatalog::district_tiles(def.district);
+        if !district_tiles.iter().all(|&idx| {
+            view.properties
+                .get(idx as usize)
+                .is_some_and(|p| p.owner == Some(player_id) && !p.is_mortgaged)
+        }) {
+            return false;
+        }
+        let min_houses = district_tiles
+            .iter()
+            .filter_map(|&idx| view.properties.get(idx as usize).map(|p| p.house_count))
+            .min()
+            .unwrap_or(0);
+        prop.house_count <= min_houses
+    }
+
+    pub fn can_sell_house(view: &PublicGameView, player_id: PlayerId, tile_index: u8) -> bool {
+        let Some(prop) = view.properties.get(tile_index as usize) else {
+            return false;
+        };
+        if prop.owner != Some(player_id) || prop.house_count == 0 {
+            return false;
+        }
+        let TileKind::Property(def) = &BoardCatalog::tile(tile_index).kind else {
+            return false;
+        };
+        let district_tiles = BoardCatalog::district_tiles(def.district);
+        let max_houses = district_tiles
+            .iter()
+            .filter_map(|&idx| view.properties.get(idx as usize).map(|p| p.house_count))
+            .max()
+            .unwrap_or(0);
+        prop.house_count >= max_houses
+    }
+
+    pub fn can_mortgage(view: &PublicGameView, player_id: PlayerId, tile_index: u8) -> bool {
+        let Some(prop) = view.properties.get(tile_index as usize) else {
+            return false;
+        };
+        if prop.owner != Some(player_id) || prop.is_mortgaged || prop.house_count > 0 {
+            return false;
+        }
+        if let TileKind::Property(def) = &BoardCatalog::tile(tile_index).kind {
+            let district_tiles = BoardCatalog::district_tiles(def.district);
+            if district_tiles
+                .iter()
+                .any(|&idx| view.properties.get(idx as usize).is_some_and(|p| p.house_count > 0))
+            {
+                return false;
+            }
+        }
+        matches!(
+            BoardCatalog::tile(tile_index).kind,
+            TileKind::Property(_) | TileKind::Station(_) | TileKind::Utility(_)
+        )
+    }
+
+    pub fn can_unmortgage(view: &PublicGameView, player_id: PlayerId, tile_index: u8) -> bool {
+        let Some(player) = view.find_player(player_id) else {
+            return false;
+        };
+        let Some(prop) = view.properties.get(tile_index as usize) else {
+            return false;
+        };
+        if prop.owner != Some(player_id) || !prop.is_mortgaged {
+            return false;
+        }
+        let mortgage_val = match &BoardCatalog::tile(tile_index).kind {
+            TileKind::Property(d) => d.mortgage_value,
+            TileKind::Station(d) => d.mortgage_value,
+            TileKind::Utility(d) => d.mortgage_value,
+            _ => return false,
+        };
+        let cost = Money(mortgage_val.0 + (mortgage_val.0 / 10));
+        player.cash >= cost
+    }
 }
 
 pub fn apply_action(
@@ -267,7 +498,7 @@ pub fn apply_action(
                 .find_player(player_id)
                 .ok_or(GameRuleError::NotCurrentPlayer(player_id))?;
             let pos = player.position;
-            let board = get_board();
+            let board = BoardCatalog::all();
             let tile = &board[pos as usize];
 
             let cost = match &tile.kind {
@@ -438,7 +669,7 @@ pub fn apply_action(
 
         ClientMessage::BuildHouse { tile_index } => {
             let tile_idx = *tile_index as usize;
-            let board = get_board();
+            let board = BoardCatalog::all();
             let tile = &board[tile_idx];
 
             let prop = match &tile.kind {
@@ -454,7 +685,7 @@ pub fn apply_action(
                 return Err(GameRuleError::MustOwnMonopolyToBuild);
             }
 
-            let district_tiles = get_district_tiles(prop.district);
+            let district_tiles = BoardCatalog::district_tiles(prop.district);
             if district_tiles
                 .iter()
                 .any(|&t| new_state.properties[t as usize].is_mortgaged)
@@ -497,7 +728,7 @@ pub fn apply_action(
 
         ClientMessage::SellHouse { tile_index } => {
             let tile_idx = *tile_index as usize;
-            let board = get_board();
+            let board = BoardCatalog::all();
             let tile = &board[tile_idx];
 
             let prop = match &tile.kind {
@@ -514,7 +745,7 @@ pub fn apply_action(
                 return Err(GameRuleError::NoHousesToSell(*tile_index));
             }
 
-            let district_tiles = get_district_tiles(prop.district);
+            let district_tiles = BoardCatalog::district_tiles(prop.district);
             let max_houses = district_tiles
                 .iter()
                 .map(|&t| new_state.properties[t as usize].house_count)
@@ -548,10 +779,10 @@ pub fn apply_action(
                 return Err(GameRuleError::PropertyHasBuildings(*tile_index));
             }
 
-            let board = get_board();
+            let board = BoardCatalog::all();
             let mortgage_val = match &board[tile_idx].kind {
                 TileKind::Property(p) => {
-                    let d_tiles = get_district_tiles(p.district);
+                    let d_tiles = BoardCatalog::district_tiles(p.district);
                     if d_tiles
                         .iter()
                         .any(|&t| new_state.properties[t as usize].house_count > 0)
@@ -584,7 +815,7 @@ pub fn apply_action(
                 return Err(GameRuleError::PropertyNotMortgaged(*tile_index));
             }
 
-            let board = get_board();
+            let board = BoardCatalog::all();
             let mortgage_val = match &board[tile_idx].kind {
                 TileKind::Property(p) => p.mortgage_value,
                 TileKind::Station(s) => s.mortgage_value,
@@ -664,7 +895,7 @@ pub fn apply_action(
                 new_state.turn_phase = TurnPhase::WaitingForRoll;
                 events.push(ServerMessage::TurnStarted {
                     active_player: player_id,
-                    time_limit_seconds: 120,
+                    time_limit_seconds: new_state.config.turn_time_limit_seconds,
                 });
             } else {
                 new_state.doubles_count = 0;
@@ -701,7 +932,7 @@ fn resolve_landing(
     events: &mut Vec<ServerMessage>,
     rng: &mut impl Rng,
 ) {
-    let board = get_board();
+    let board = BoardCatalog::all();
     let tile = &board[tile_index as usize];
 
     match &tile.kind {
@@ -810,9 +1041,8 @@ fn apply_card(
 ) {
     events.push(ServerMessage::CardDrawn {
         player_id,
-        deck: card.deck.to_string(),
-        description: card.title.clone(),
-        effect_summary: card.description.clone(),
+        deck: card.deck.into(),
+        card_id: CardId(card.id),
     });
 
     match &card.effect {
@@ -1012,7 +1242,7 @@ pub fn advance_turn(state: &mut GameState, events: &mut Vec<ServerMessage>) {
             state.turn_phase = TurnPhase::WaitingForRoll;
             events.push(ServerMessage::TurnStarted {
                 active_player: next_id,
-                time_limit_seconds: 30,
+                time_limit_seconds: state.config.turn_time_limit_seconds,
             });
             break;
         }

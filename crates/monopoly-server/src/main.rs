@@ -1,7 +1,5 @@
-use dashmap::DashMap;
-use monopoly_server::{create_router, AppState};
+use monopoly_server::{create_router, AppState, LobbyRegistry};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -9,7 +7,7 @@ use tracing::info;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let registry = Arc::new(DashMap::new());
+    let registry = LobbyRegistry::new();
     let state = AppState { registry };
 
     let port: u16 = std::env::var("PORT")

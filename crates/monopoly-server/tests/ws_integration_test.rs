@@ -84,15 +84,22 @@ async fn test_turn_timer_expiration_and_bot_takeover() {
     // are being emitted by reading stream
     let (_sink1, mut stream1) = streams.remove(0);
 
-    // Read subsequent messages for TimerTick (allow reading through join snapshots, GameStarted, etc.)
-    let mut got_timer_tick = false;
+    // Verify TurnStarted with 120s deadline is emitted
+    let mut got_turn_started = false;
     for _ in 0..15 {
-        if let Some(ServerMessage::TimerTick { .. }) = recv_msg(&mut stream1).await {
-            got_timer_tick = true;
+        if let Some(ServerMessage::TurnStarted {
+            time_limit_seconds: 120,
+            ..
+        }) = recv_msg(&mut stream1).await
+        {
+            got_turn_started = true;
             break;
         }
     }
-    assert!(got_timer_tick, "Expected TimerTick messages from server");
+    assert!(
+        got_turn_started,
+        "Expected TurnStarted(120s) message from server"
+    );
 }
 
 #[tokio::test]
@@ -186,7 +193,7 @@ async fn test_prolonged_disconnect_grace_expiry() {
     let mut received_snapshot = false;
 
     for _ in 0..5 {
-        if let Some(ServerMessage::SyncSnapshot { .. }) = recv_msg(&mut stream2).await {
+        if let Some(ServerMessage::SyncView { .. }) = recv_msg(&mut stream2).await {
             received_snapshot = true;
             break;
         }
@@ -203,7 +210,7 @@ async fn test_empty_room_cleanup_after_5_minutes() {
     let room_id = RoomId("SGN-CLEAN".to_string());
     let room_tx = RoomActor::spawn(room_id.clone(), server.state.registry.clone());
 
-    assert!(server.state.registry.contains_key(&room_id.0));
+    assert!(server.state.registry.contains(&room_id.0));
 
     // Connect and disconnect a client
     let (mut sink, mut stream) = server.connect_ws(&room_id.0).await;
@@ -221,14 +228,14 @@ async fn test_empty_room_cleanup_after_5_minutes() {
     drop(stream);
     sleep(Duration::from_millis(50)).await;
 
-    // Send EmptyRoomTimeout command directly to simulate 5-minute timeout
+    // Send EmptyRoomTimeout command directly to simulate timeout
     let _ = room_tx
         .send(monopoly_server::room::RoomCommand::EmptyRoomTimeout)
         .await;
     sleep(Duration::from_millis(50)).await;
 
     // Room should be cleanly removed from registry
-    assert!(!server.state.registry.contains_key(&room_id.0));
+    assert!(!server.state.registry.contains(&room_id.0));
 }
 
 #[tokio::test]
@@ -247,12 +254,12 @@ async fn test_2player_waiting_room_and_host_start_game() {
     )
     .await;
     let _ = recv_msg(&mut stream1).await.expect("RoomJoined p1");
-    match recv_msg(&mut stream1).await.expect("SyncSnapshot p1") {
-        ServerMessage::SyncSnapshot { state } => {
-            assert_eq!(state["is_game_started"], false);
-            assert_eq!(state["players"].as_array().unwrap().len(), 1);
+    match recv_msg(&mut stream1).await.expect("SyncView p1") {
+        ServerMessage::SyncView { view } => {
+            assert!(!view.is_game_started);
+            assert_eq!(view.players.len(), 1);
         }
-        other => panic!("Expected SyncSnapshot, got {:?}", other),
+        other => panic!("Expected SyncView, got {:?}", other),
     }
 
     let (mut sink2, mut stream2) = server.connect_ws(&room_id.0).await;
@@ -299,19 +306,18 @@ async fn test_host_add_bot_and_start_game() {
     )
     .await;
     let _ = recv_msg(&mut stream1).await.expect("RoomJoined");
-    let _ = recv_msg(&mut stream1).await.expect("Initial SyncSnapshot");
+    let _ = recv_msg(&mut stream1).await.expect("Initial SyncView");
 
     send_json(&mut sink1, &ClientMessage::AddBot).await;
     match recv_msg(&mut stream1)
         .await
-        .expect("SyncSnapshot after AddBot")
+        .expect("SyncView after AddBot")
     {
-        ServerMessage::SyncSnapshot { state } => {
-            let players = state["players"].as_array().unwrap();
-            assert_eq!(players.len(), 2);
-            assert_eq!(players[1]["is_bot_controlled"], true);
+        ServerMessage::SyncView { view } => {
+            assert_eq!(view.players.len(), 2);
+            assert!(view.players[1].is_bot_controlled);
         }
-        other => panic!("Expected SyncSnapshot, got {:?}", other),
+        other => panic!("Expected SyncView, got {:?}", other),
     }
 
     send_json(&mut sink1, &ClientMessage::StartGame).await;
@@ -351,7 +357,7 @@ async fn test_multiple_rooms_separated_by_room_code() {
         }
         other => panic!("Expected RoomJoined, got {:?}", other),
     }
-    let _ = recv_msg(&mut stream_a1).await.expect("SyncSnapshot A1");
+    let _ = recv_msg(&mut stream_a1).await.expect("SyncView A1");
 
     // Connect Player B1 to ROOM-BETA
     let (mut sink_b1, mut stream_b1) = server.connect_ws("ROOM-BETA").await;
@@ -374,17 +380,16 @@ async fn test_multiple_rooms_separated_by_room_code() {
         }
         other => panic!("Expected RoomJoined, got {:?}", other),
     }
-    match recv_msg(&mut stream_b1).await.expect("SyncSnapshot B1") {
-        ServerMessage::SyncSnapshot { state } => {
-            let players = state["players"].as_array().unwrap();
-            assert_eq!(players.len(), 1);
-            assert_eq!(players[0]["name"], "Bob");
+    match recv_msg(&mut stream_b1).await.expect("SyncView B1") {
+        ServerMessage::SyncView { view } => {
+            assert_eq!(view.players.len(), 1);
+            assert_eq!(view.players[0].name, "Bob");
         }
-        other => panic!("Expected SyncSnapshot, got {:?}", other),
+        other => panic!("Expected SyncView, got {:?}", other),
     }
 
-    assert!(server.state.registry.contains_key("ROOM-ALPHA"));
-    assert!(server.state.registry.contains_key("ROOM-BETA"));
+    assert!(server.state.registry.contains("ROOM-ALPHA"));
+    assert!(server.state.registry.contains("ROOM-BETA"));
 }
 
 #[tokio::test]
@@ -401,7 +406,7 @@ async fn test_configure_max_players_limits_room_and_auto_starts() {
     )
     .await;
     let _ = recv_msg(&mut stream1).await.expect("RoomJoined 1");
-    let _ = recv_msg(&mut stream1).await.expect("SyncSnapshot 1");
+    let _ = recv_msg(&mut stream1).await.expect("SyncView 1");
 
     send_json(
         &mut sink1,
@@ -411,11 +416,11 @@ async fn test_configure_max_players_limits_room_and_auto_starts() {
         },
     )
     .await;
-    match recv_msg(&mut stream1).await.expect("SyncSnapshot cfg") {
-        ServerMessage::SyncSnapshot { state } => {
-            assert_eq!(state["config"]["max_players"], 2);
+    match recv_msg(&mut stream1).await.expect("SyncView cfg") {
+        ServerMessage::SyncView { view } => {
+            assert_eq!(view.config.max_players, 2);
         }
-        other => panic!("Expected SyncSnapshot, got {:?}", other),
+        other => panic!("Expected SyncView, got {:?}", other),
     }
 
     // Second player joins -> room reaches max_players (2) and auto-starts

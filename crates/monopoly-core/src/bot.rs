@@ -1,19 +1,18 @@
-use monopoly_core::board::{get_board, TileKind};
-use monopoly_core::money::Money;
-use monopoly_core::state::{GameState, TurnPhase};
-use monopoly_proto::{ClientMessage, PlayerId};
+use crate::board::{BoardCatalog, TileKind};
+use crate::state::GameState;
+use monopoly_proto::{ClientMessage, Money, PlayerId, PublicGameView, PublicTurnPhase};
 
-pub struct XeOmBot;
+pub struct BotPolicy;
 
-impl XeOmBot {
-    pub fn decide_action(state: &GameState, player_id: PlayerId) -> Option<ClientMessage> {
-        let player = state.find_player(player_id)?;
+impl BotPolicy {
+    pub fn decide_action(view: &PublicGameView, player_id: PlayerId) -> Option<ClientMessage> {
+        let player = view.find_player(player_id)?;
         if player.is_bankrupt {
             return None;
         }
 
-        match state.turn_phase {
-            TurnPhase::WaitingForRoll => {
+        match view.turn_phase {
+            PublicTurnPhase::WaitingForRoll => {
                 if player.in_jail {
                     if player.get_out_of_jail_cards > 0 {
                         Some(ClientMessage::UseJailCard)
@@ -26,10 +25,8 @@ impl XeOmBot {
                     Some(ClientMessage::RollDice)
                 }
             }
-            TurnPhase::TileActionPending => {
-                let pos = player.position as usize;
-                let board = get_board();
-                let tile = &board[pos];
+            PublicTurnPhase::TileActionPending => {
+                let tile = BoardCatalog::tile(player.position);
                 let cost = match &tile.kind {
                     TileKind::Property(p) => p.cost,
                     TileKind::Station(s) => s.cost,
@@ -43,10 +40,9 @@ impl XeOmBot {
                     Some(ClientMessage::DeclineProperty)
                 }
             }
-            TurnPhase::Auction => {
-                let auction = state.auction.as_ref()?;
-                let board = get_board();
-                let tile = &board[auction.tile_index as usize];
+            PublicTurnPhase::Auction => {
+                let auction = view.auction.as_ref()?;
+                let tile = BoardCatalog::tile(auction.tile_index);
                 let cost = match &tile.kind {
                     TileKind::Property(p) => p.cost,
                     TileKind::Station(s) => s.cost,
@@ -66,7 +62,11 @@ impl XeOmBot {
                     Some(ClientMessage::PassAuction)
                 }
             }
-            TurnPhase::TurnEnded => Some(ClientMessage::EndTurn),
+            PublicTurnPhase::TurnEnded => Some(ClientMessage::EndTurn),
         }
+    }
+
+    pub fn decide_action_state(state: &GameState, player_id: PlayerId) -> Option<ClientMessage> {
+        Self::decide_action(&state.to_public_view(), player_id)
     }
 }

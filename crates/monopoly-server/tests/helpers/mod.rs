@@ -1,9 +1,7 @@
-use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use monopoly_proto::{ClientMessage, ServerMessage};
-use monopoly_server::{create_router, AppState};
+use monopoly_server::{create_router, AppState, LobbyRegistry};
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -15,7 +13,7 @@ pub struct TestServer {
 
 impl TestServer {
     pub async fn spawn() -> Self {
-        let registry = Arc::new(DashMap::new());
+        let registry = LobbyRegistry::new();
         let state = AppState { registry };
         let app = create_router(state.clone());
 

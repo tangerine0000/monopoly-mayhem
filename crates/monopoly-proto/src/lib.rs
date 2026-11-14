@@ -37,38 +37,47 @@ pub struct Money(pub i64); // 1 unit = 1,000 VNĐ
 impl Money {
     pub const ZERO: Money = Money(0);
 
-    pub fn from_vnd(vnd: i64) -> Self {
+    pub const fn from_vnd(vnd: i64) -> Self {
         Money(vnd / 1_000)
     }
 
-    pub fn as_vnd(&self) -> i64 {
+    pub const fn as_vnd(&self) -> i64 {
         self.0 * 1_000
+    }
+
+    pub fn format(&self, locale: Locale) -> String {
+        let vnd = self.as_vnd();
+        let is_negative = vnd < 0;
+        let s = vnd.unsigned_abs().to_string();
+        let sep = match locale {
+            Locale::Vi => '.',
+            Locale::En => ',',
+        };
+        let suffix = match locale {
+            Locale::Vi => " đ",
+            Locale::En => " VND",
+        };
+
+        let mut formatted = String::with_capacity(s.len() + s.len() / 3);
+        let len = s.len();
+        for (i, ch) in s.chars().enumerate() {
+            if i > 0 && (len - i).is_multiple_of(3) {
+                formatted.push(sep);
+            }
+            formatted.push(ch);
+        }
+
+        if is_negative {
+            format!("-{}{}", formatted, suffix)
+        } else {
+            format!("{}{}", formatted, suffix)
+        }
     }
 }
 
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let vnd = self.as_vnd();
-        let is_negative = vnd < 0;
-        let abs_val = vnd.unsigned_abs();
-        let s = abs_val.to_string();
-
-        let mut formatted = String::new();
-        let chars: Vec<char> = s.chars().collect();
-        let len = chars.len();
-
-        for (i, ch) in chars.iter().enumerate() {
-            if i > 0 && (len - i).is_multiple_of(3) {
-                formatted.push('.');
-            }
-            formatted.push(*ch);
-        }
-
-        if is_negative {
-            write!(f, "-{} đ", formatted)
-        } else {
-            write!(f, "{} đ", formatted)
-        }
+        write!(f, "{}", self.format(Locale::Vi))
     }
 }
 
@@ -137,6 +146,135 @@ pub enum ClientMessage {
     AddBot,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+pub enum Locale {
+    #[default]
+    Vi,
+    En,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum DeckId {
+    Chance,
+    CommunityChest,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct TileId(pub u8);
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct CardId(pub u16);
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MessageKey {
+    // Room / Lobby
+    RoomAlreadyStarted,
+    RoomFull,
+    HostOnlyStart,
+    HostOnlyAddBot,
+    NeedAtLeastTwoPlayers,
+    BotName { index: u8 },
+    Timeout,
+    Disconnected,
+    // Game rules
+    GameNotStarted,
+    GameAlreadyStarted,
+    GameAlreadyOver,
+    NotYourTurn,
+    InvalidPhase,
+    InsufficientFunds,
+    PropertyNotPurchasable,
+    PropertyAlreadyOwned,
+    MustOwnFullDistrict,
+    PropertyMortgaged,
+    MustBuildEvenly,
+    MustSellEvenly,
+    MaxHousesReached,
+    NoHousesToSell,
+    CannotMortgageWithBuildings,
+    PropertyNotMortgaged,
+    NotInJail,
+    NoJailCard,
+    AuctionNotActive,
+    BidTooLow,
+    NotEligibleToBid,
+    InvalidTileIndex,
+    InvalidPlayerCount,
+    DebtNotExceeded,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PublicTurnPhase {
+    WaitingForRoll,
+    TileActionPending,
+    Auction,
+    TurnEnded,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublicGameConfig {
+    pub enable_auction: bool,
+    pub max_players: u8,
+    pub turn_time_limit_seconds: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublicPlayerView {
+    pub id: PlayerId,
+    pub name: String,
+    pub seat_index: u8,
+    pub cash: Money,
+    pub position: u8,
+    pub in_jail: bool,
+    pub turns_in_jail: u8,
+    pub get_out_of_jail_cards: u8,
+    pub is_bankrupt: bool,
+    pub is_connected: bool,
+    pub is_bot_controlled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PublicPropertyView {
+    pub owner: Option<PlayerId>,
+    pub house_count: u8,
+    pub is_mortgaged: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublicAuctionView {
+    pub tile_index: u8,
+    pub current_bid: Money,
+    pub highest_bidder: Option<PlayerId>,
+    pub active_bidders: Vec<PlayerId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublicGameView {
+    pub config: PublicGameConfig,
+    pub players: Vec<PublicPlayerView>,
+    pub turn_order: Vec<PlayerId>,
+    pub current_player_index: usize,
+    pub properties: Vec<PublicPropertyView>,
+    pub turn_phase: PublicTurnPhase,
+    pub doubles_count: u8,
+    pub last_dice: (u8, u8),
+    pub auction: Option<PublicAuctionView>,
+    pub is_game_started: bool,
+    pub is_game_over: bool,
+    pub winner: Option<PlayerId>,
+}
+
+impl PublicGameView {
+    pub fn current_player(&self) -> Option<&PublicPlayerView> {
+        let id = self.turn_order.get(self.current_player_index)?;
+        self.players.iter().find(|p| &p.id == id)
+    }
+
+    pub fn find_player(&self, id: PlayerId) -> Option<&PublicPlayerView> {
+        self.players.iter().find(|p| p.id == id)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "payload")]
 pub enum ServerMessage {
@@ -195,24 +333,23 @@ pub enum ServerMessage {
     },
     CardDrawn {
         player_id: PlayerId,
-        deck: String, // "Cơ Hội" | "Khí Vận"
-        description: String,
-        effect_summary: String,
+        deck: DeckId,
+        card_id: CardId,
     },
     PlayerBankrupt {
         player_id: PlayerId,
     },
     BotAssumedControl {
         player_id: PlayerId,
-        reason: String, // "Timeout" | "Disconnected"
+        reason: MessageKey,
     },
     PlayerReconnected {
         player_id: PlayerId,
     },
-    SyncSnapshot {
-        state: serde_json::Value,
+    SyncView {
+        view: PublicGameView,
     },
     ActionRejected {
-        reason: String,
+        reason: MessageKey,
     },
 }
