@@ -193,9 +193,6 @@ async fn handle_socket(socket: WebSocket, room_tx: mpsc::Sender<RoomCommand>) {
                 _ => {}
             }
         }
-        let _ = room_tx_clone
-            .send(RoomCommand::DisconnectClient(player_id))
-            .await;
     });
 
     // Wait until either sending or receiving fails
@@ -204,5 +201,6 @@ async fn handle_socket(socket: WebSocket, room_tx: mpsc::Sender<RoomCommand>) {
         _ = &mut recv_task => send_task.abort(),
     }
 
+    // Báo ngắt kết nối đúng một lần (trước đây gửi hai lần, làm hai grace timer cùng chạy)
     let _ = room_tx.send(RoomCommand::DisconnectClient(player_id)).await;
 }

@@ -89,6 +89,28 @@ pub enum TurnPhase {
     TileActionPending,
     Auction,
     TurnEnded,
+    /// Người chơi đang nợ và phải gom tiền (bán nhà / thế chấp) hoặc tuyên bố phá sản.
+    Debt,
+}
+
+/// Khoản nợ đang treo. `creditors` rỗng nghĩa là nợ ngân hàng; nhiều người thì chia đều.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebtSession {
+    pub debtor: PlayerId,
+    pub creditors: Vec<PlayerId>,
+    pub amount: Money,
+    pub tile_index: Option<u8>,
+}
+
+/// Đề nghị giao dịch giữa người đang tới lượt (`from`) và người nhận (`to`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TradeOffer {
+    pub from: PlayerId,
+    pub to: PlayerId,
+    pub give_tiles: Vec<u8>,
+    pub give_cash: Money,
+    pub take_tiles: Vec<u8>,
+    pub take_cash: Money,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,6 +129,10 @@ pub struct GameState {
     pub community_chest_deck: Vec<Card>,
     pub community_chest_discard: Vec<Card>,
     pub auction: Option<AuctionSession>,
+    #[serde(default)]
+    pub debt: Option<DebtSession>,
+    #[serde(default)]
+    pub trade: Option<TradeOffer>,
     pub is_game_started: bool,
     pub is_game_over: bool,
     pub winner: Option<PlayerId>,
@@ -134,6 +160,8 @@ impl GameState {
             community_chest_deck: get_community_chest_deck(),
             community_chest_discard: Vec::new(),
             auction: None,
+            debt: None,
+            trade: None,
             is_game_started: false,
             is_game_over: false,
             winner: None,
@@ -162,6 +190,56 @@ impl GameState {
 
     pub fn find_player_mut(&mut self, id: PlayerId) -> Option<&mut PlayerState> {
         self.players.iter_mut().find(|p| p.id == id)
+    }
+
+    /// Số tiền tối đa người chơi gom được nếu bán hết nhà (nửa giá) và thế chấp mọi ô.
+    pub fn liquidation_value(&self, player_id: PlayerId) -> Money {
+        let board = get_board();
+        let mut total = Money::ZERO;
+        for (idx, prop) in self.properties.iter().enumerate() {
+            if prop.owner != Some(player_id) {
+                continue;
+            }
+            match &board[idx].kind {
+                TileKind::Property(p) => {
+                    total += Money(p.house_cost.0 / 2 * prop.house_count as i64);
+                    if !prop.is_mortgaged {
+                        total += p.mortgage_value;
+                    }
+                }
+                TileKind::Station(st) if !prop.is_mortgaged => total += st.mortgage_value,
+                TileKind::Utility(u) if !prop.is_mortgaged => total += u.mortgage_value,
+                _ => {}
+            }
+        }
+        total
+    }
+
+    /// Tổng tài sản để xếp hạng: tiền mặt + giá đất (nửa nếu thế chấp) + giá nhà.
+    pub fn net_worth(&self, player_id: PlayerId) -> Money {
+        let board = get_board();
+        let mut total = self
+            .find_player(player_id)
+            .map(|p| p.cash)
+            .unwrap_or(Money::ZERO);
+        for (idx, prop) in self.properties.iter().enumerate() {
+            if prop.owner != Some(player_id) {
+                continue;
+            }
+            let (cost, house_cost) = match &board[idx].kind {
+                TileKind::Property(p) => (p.cost, p.house_cost),
+                TileKind::Station(st) => (st.cost, Money::ZERO),
+                TileKind::Utility(u) => (u.cost, Money::ZERO),
+                _ => continue,
+            };
+            total += if prop.is_mortgaged {
+                Money(cost.0 / 2)
+            } else {
+                cost
+            };
+            total += Money(house_cost.0 * prop.house_count as i64);
+        }
+        total
     }
 
     pub fn active_players(&self) -> Vec<&PlayerState> {

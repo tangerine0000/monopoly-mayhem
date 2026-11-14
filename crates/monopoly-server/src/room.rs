@@ -1,7 +1,7 @@
 use crate::bot::XeOmBot;
 use crate::timer::{TimerNotification, TurnTimer};
 use dashmap::DashMap;
-use monopoly_core::rules::apply_action;
+use monopoly_core::rules::{apply_action, close_auction};
 use monopoly_core::state::{GameState, PlayerState, TurnPhase};
 use monopoly_proto::{ClientMessage, PlayerId, RoomId, ServerMessage, SessionToken};
 use rand_chacha::rand_core::SeedableRng;
@@ -25,8 +25,15 @@ pub enum RoomCommand {
     ClientAction(PlayerId, ClientMessage),
     TimerEvent(TimerNotification),
     BotTurn(PlayerId),
+    /// (thế hệ đồng hồ, số giây còn lại); 0 = hết giờ
+    AuctionTick(u64, u32),
     EmptyRoomTimeout,
 }
+
+/// Mỗi lần có người trả giá, đồng hồ đấu giá đặt lại về chừng này giây.
+pub const AUCTION_SECONDS: u32 = 8;
+/// Giới hạn số bước bot được làm liên tiếp, phòng trường hợp logic bot lỗi.
+const MAX_BOT_STEPS: usize = 60;
 
 pub struct RoomActor {
     room_id: RoomId,
@@ -37,6 +44,8 @@ pub struct RoomActor {
     turn_timer_handle: Option<tokio::task::JoinHandle<()>>,
     grace_timer_handle: Option<tokio::task::JoinHandle<()>>,
     empty_room_timer_handle: Option<tokio::task::JoinHandle<()>>,
+    auction_timer_handle: Option<tokio::task::JoinHandle<()>>,
+    auction_generation: u64,
     cmd_rx: mpsc::Receiver<RoomCommand>,
     self_tx: mpsc::Sender<RoomCommand>,
     registry: Arc<DashMap<String, mpsc::Sender<RoomCommand>>>,
@@ -63,6 +72,8 @@ impl RoomActor {
             turn_timer_handle: None,
             grace_timer_handle: None,
             empty_room_timer_handle: Some(empty_timer),
+            auction_timer_handle: None,
+            auction_generation: 0,
             cmd_rx,
             self_tx: cmd_tx.clone(),
             registry: registry.clone(),
@@ -99,6 +110,9 @@ impl RoomActor {
                 RoomCommand::BotTurn(bot_id) => {
                     self.execute_bot_sequence(bot_id).await;
                 }
+                RoomCommand::AuctionTick(generation, secs) => {
+                    self.handle_auction_tick(generation, secs).await;
+                }
                 RoomCommand::EmptyRoomTimeout => {
                     if self.clients.is_empty() {
                         info!(
@@ -109,6 +123,9 @@ impl RoomActor {
                             h.abort();
                         }
                         if let Some(h) = self.grace_timer_handle.take() {
+                            h.abort();
+                        }
+                        if let Some(h) = self.auction_timer_handle.take() {
                             h.abort();
                         }
                         self.registry.remove(&self.room_id.0);
@@ -308,6 +325,9 @@ impl RoomActor {
         // If disconnected player was active player, start 15s grace timer
         if let Some(cur) = self.state.current_player() {
             if cur.id == player_id && self.state.is_game_started && !self.state.is_game_over {
+                if let Some(h) = self.grace_timer_handle.take() {
+                    h.abort();
+                }
                 let (notify_tx, mut notify_rx) = mpsc::channel(16);
                 let handle = TurnTimer::spawn_disconnect_grace(player_id, 15, notify_tx);
                 self.grace_timer_handle = Some(handle);
@@ -332,7 +352,8 @@ impl RoomActor {
         }
     }
 
-    async fn handle_action(&mut self, player_id: PlayerId, action: ClientMessage) {
+    /// Trả về `true` nếu hành động được chấp nhận.
+    async fn handle_action(&mut self, player_id: PlayerId, action: ClientMessage) -> bool {
         if !self.state.is_game_started {
             let is_host = self
                 .state
@@ -367,7 +388,7 @@ impl RoomActor {
                                 },
                             );
                         }
-                        return;
+                        return false;
                     }
                     let max_players = self.state.config.max_players.clamp(2, 4) as usize;
                     if self.state.players.len() >= max_players {
@@ -379,7 +400,7 @@ impl RoomActor {
                                 },
                             );
                         }
-                        return;
+                        return false;
                     }
                     let bot_names = [
                         "Máy Phú Nhuận",
@@ -414,7 +435,7 @@ impl RoomActor {
                                 },
                             );
                         }
-                        return;
+                        return false;
                     }
                     if self.state.players.len() < 2 {
                         if let Some(tx) = self.clients.get(&player_id) {
@@ -425,7 +446,7 @@ impl RoomActor {
                                 },
                             );
                         }
-                        return;
+                        return false;
                     }
                     self.start_game().await;
                 }
@@ -440,7 +461,19 @@ impl RoomActor {
                     }
                 }
             }
-            return;
+            return false;
+        }
+
+        if matches!(action, ClientMessage::ConfigureGame { .. }) {
+            if let Some(tx) = self.clients.get(&player_id) {
+                Self::send_to_client(
+                    tx,
+                    &ServerMessage::ActionRejected {
+                        reason: "Chỉ có thể chỉnh luật phòng trước khi bắt đầu".to_string(),
+                    },
+                );
+            }
+            return false;
         }
 
         match apply_action(&self.state, player_id, &action, &mut self.rng) {
@@ -450,8 +483,19 @@ impl RoomActor {
 
                 self.state = new_state;
 
+                let restart_auction_clock = events.iter().any(|e| {
+                    matches!(
+                        e,
+                        ServerMessage::AuctionStarted { .. } | ServerMessage::BidPlaced { .. }
+                    )
+                });
                 for ev in events {
                     self.broadcast(ev).await;
+                }
+                if self.state.auction.is_none() {
+                    self.stop_auction_clock();
+                } else if restart_auction_clock {
+                    self.start_auction_clock();
                 }
 
                 self.broadcast(ServerMessage::SyncSnapshot {
@@ -468,22 +512,10 @@ impl RoomActor {
                         let active_id = active.id;
                         self.start_player_turn(active_id).await;
                     }
-                } else if self.state.turn_phase == TurnPhase::Auction {
-                    if let Some(auc) = &self.state.auction {
-                        if let Some(&bot_bidder) = auc.active_bidders.iter().find(|bidder_id| {
-                            self.state
-                                .find_player(**bidder_id)
-                                .map(|p| p.is_bot_controlled)
-                                .unwrap_or(false)
-                        }) {
-                            let tx = self.self_tx.clone();
-                            tokio::spawn(async move {
-                                sleep(Duration::from_millis(500)).await;
-                                let _ = tx.send(RoomCommand::BotTurn(bot_bidder)).await;
-                            });
-                        }
-                    }
+                } else {
+                    self.schedule_waiting_bots(player_id);
                 }
+                true
             }
             Err(e) => {
                 warn!("Action rejected for {}: {}", player_id, e);
@@ -495,6 +527,90 @@ impl RoomActor {
                         },
                     );
                 }
+                false
+            }
+        }
+    }
+
+    /// Lên lịch cho các bot đang phải hành động mà không phải lượt của chính chúng:
+    /// người nhận giao dịch, bot trong phiên đấu giá, bot đang tới lượt (vd. đang nợ).
+    fn schedule_waiting_bots(&self, actor: PlayerId) {
+        let mut due: Vec<PlayerId> = Vec::new();
+        for p in &self.state.players {
+            if p.is_bot_controlled
+                && p.id != actor
+                && monopoly_core::bot::decide_action(&self.state, p.id).is_some()
+            {
+                due.push(p.id);
+            }
+        }
+        for (i, bot_id) in due.into_iter().enumerate() {
+            let tx = self.self_tx.clone();
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(500 + 350 * i as u64)).await;
+                let _ = tx.send(RoomCommand::BotTurn(bot_id)).await;
+            });
+        }
+    }
+
+    fn stop_auction_clock(&mut self) {
+        if let Some(h) = self.auction_timer_handle.take() {
+            h.abort();
+        }
+        self.auction_generation += 1;
+    }
+
+    fn start_auction_clock(&mut self) {
+        self.stop_auction_clock();
+        let generation = self.auction_generation;
+        let tx = self.self_tx.clone();
+        self.auction_timer_handle = Some(tokio::spawn(async move {
+            for s in (0..=AUCTION_SECONDS).rev() {
+                if tx
+                    .send(RoomCommand::AuctionTick(generation, s))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                if s > 0 {
+                    sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }));
+    }
+
+    async fn handle_auction_tick(&mut self, generation: u64, secs: u32) {
+        if generation != self.auction_generation || self.state.auction.is_none() {
+            return;
+        }
+        self.broadcast(ServerMessage::AuctionTimer {
+            seconds_remaining: secs,
+        })
+        .await;
+        if secs > 0 {
+            return;
+        }
+        // Hết giờ: người trả giá cao nhất thắng
+        self.auction_timer_handle = None;
+        let mut events = Vec::new();
+        close_auction(&mut self.state, &mut events);
+        for ev in events {
+            self.broadcast(ev).await;
+        }
+        self.broadcast(ServerMessage::SyncSnapshot {
+            state: serde_json::to_value(&self.state).unwrap_or_default(),
+        })
+        .await;
+        // Lượt tiếp tục với người đang tới lượt; nếu là bot hoặc mất kết nối thì đi tiếp
+        if let Some(cur) = self.state.current_player() {
+            if cur.is_bot_controlled || !cur.is_connected {
+                let id = cur.id;
+                let tx = self.self_tx.clone();
+                tokio::spawn(async move {
+                    sleep(Duration::from_millis(500)).await;
+                    let _ = tx.send(RoomCommand::BotTurn(id)).await;
+                });
             }
         }
     }
@@ -526,11 +642,23 @@ impl RoomActor {
         }
     }
 
+    /// Cho bot (hoặc người chơi hết giờ / mất kết nối) đi tiếp cho tới khi không còn
+    /// việc phải làm. Dừng ngay khi một hành động bị từ chối hoặc vượt giới hạn bước,
+    /// nên không thể lặp vô hạn.
     async fn execute_bot_sequence(&mut self, player_id: PlayerId) {
-        while let Some(bot_action) = XeOmBot::decide_action(&self.state, player_id) {
+        for _ in 0..MAX_BOT_STEPS {
+            let Some(bot_action) = XeOmBot::decide_action(&self.state, player_id) else {
+                break;
+            };
             let is_end_turn = matches!(bot_action, ClientMessage::EndTurn);
-            self.handle_action(player_id, bot_action).await;
-            if is_end_turn || self.state.is_game_over {
+            let was_bid = matches!(bot_action, ClientMessage::PlaceBid { .. });
+            if !self.handle_action(player_id, bot_action).await {
+                warn!("Bot action rejected for {}, stopping sequence", player_id);
+                break;
+            }
+            // Trong phiên đấu giá, bot chỉ trả giá một lần rồi chờ người khác (trừ khi đấu giá vừa đóng)
+            let wait_for_others_bid = was_bid && self.state.turn_phase == TurnPhase::Auction;
+            if is_end_turn || wait_for_others_bid || self.state.is_game_over {
                 break;
             }
         }

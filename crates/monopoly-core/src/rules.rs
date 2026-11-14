@@ -1,7 +1,9 @@
 use crate::board::{get_board, get_district_tiles, TileKind};
 use crate::cards::CardEffect;
 use crate::money::Money;
-use crate::state::{GameState, TurnPhase, JAIL_BAIL_VND, PASS_GO_REWARD_VND};
+use crate::state::{
+    DebtSession, GameState, TradeOffer, TurnPhase, JAIL_BAIL_VND, PASS_GO_REWARD_VND,
+};
 use monopoly_proto::{ClientMessage, PlayerId, ServerMessage};
 use rand::Rng;
 use thiserror::Error;
@@ -86,8 +88,24 @@ pub fn apply_action(
             if new_state.turn_phase != TurnPhase::Auction {
                 return Err(GameRuleError::NotInAuction);
             }
+            let in_auction = new_state
+                .auction
+                .as_ref()
+                .map(|a| a.active_bidders.contains(&player_id))
+                .unwrap_or(false);
+            if !in_auction {
+                return Err(GameRuleError::InvalidAction(
+                    "Bạn không còn trong phiên đấu giá".to_string(),
+                ));
+            }
         }
-        ClientMessage::ConfigureGame { .. } => {}
+        ClientMessage::RespondTrade { .. } => {
+            if new_state.trade.as_ref().map(|t| t.to) != Some(player_id) {
+                return Err(GameRuleError::InvalidAction(
+                    "Không có đề nghị giao dịch nào gửi cho bạn".to_string(),
+                ));
+            }
+        }
         _ => {
             let current = new_state
                 .current_player()
@@ -98,8 +116,23 @@ pub fn apply_action(
         }
     }
 
+    if new_state.turn_phase == TurnPhase::Debt
+        && !matches!(
+            action,
+            ClientMessage::SellHouse { .. }
+                | ClientMessage::MortgageProperty { .. }
+                | ClientMessage::PayDebt
+                | ClientMessage::DeclareBankruptcy
+        )
+    {
+        return Err(GameRuleError::InvalidAction(
+            "Cần trả nợ hoặc tuyên bố phá sản trước".to_string(),
+        ));
+    }
+
     match action {
         ClientMessage::RollDice => {
+            clear_trade(&mut new_state, &mut events);
             if new_state.turn_phase != TurnPhase::WaitingForRoll {
                 return Err(GameRuleError::InvalidPhase {
                     expected: "WaitingForRoll",
@@ -189,7 +222,15 @@ pub fn apply_action(
                                 rng,
                             );
                         } else {
-                            handle_bankruptcy(&mut new_state, player_id, None, &mut events);
+                            // Không đủ tiền bảo lãnh: ở lại, gom tiền hoặc phá sản
+                            events.push(ServerMessage::DiceRolled {
+                                player_id,
+                                dice: (die1, die2),
+                                new_tile_index: cur_pos,
+                                is_doubles: false,
+                            });
+                            new_state.turn_phase = TurnPhase::TurnEnded;
+                            charge(&mut new_state, player_id, vec![], bail, None, &mut events);
                         }
                     } else {
                         events.push(ServerMessage::DiceRolled {
@@ -338,25 +379,27 @@ pub fn apply_action(
         }
 
         ClientMessage::PlaceBid { amount } => {
-            let current_bid = {
+            let (current_bid, leader) = {
                 let auction = new_state
                     .auction
                     .as_ref()
                     .ok_or(GameRuleError::NotInAuction)?;
-                auction.current_bid
+                (auction.current_bid, auction.highest_bidder)
             };
-
+            if leader == Some(player_id) {
+                return Err(GameRuleError::InvalidAction(
+                    "Bạn đang trả giá cao nhất".to_string(),
+                ));
+            }
             if *amount <= current_bid {
                 return Err(GameRuleError::BidTooLow {
                     bid: *amount,
                     current: current_bid,
                 });
             }
-
             let bidder = new_state
                 .find_player(player_id)
                 .ok_or(GameRuleError::NotCurrentPlayer(player_id))?;
-
             if bidder.cash < *amount {
                 return Err(GameRuleError::InsufficientFunds {
                     needed: *amount,
@@ -364,36 +407,16 @@ pub fn apply_action(
                 });
             }
 
-            let auction = new_state
-                .auction
-                .as_mut()
-                .ok_or(GameRuleError::NotInAuction)?;
+            let auction = new_state.auction.as_mut().unwrap();
             auction.current_bid = *amount;
             auction.highest_bidder = Some(player_id);
-
+            let only_one_left = auction.active_bidders.len() <= 1;
             events.push(ServerMessage::BidPlaced {
                 bidder: player_id,
                 amount: *amount,
             });
-
-            if auction.active_bidders.len() <= 1 {
-                let final_price = auction.current_bid;
-                let tile_idx = auction.tile_index;
-                if let Some(winner_player) = new_state.find_player_mut(player_id) {
-                    winner_player.cash -= final_price;
-                    new_state.properties[tile_idx as usize].owner = Some(player_id);
-                }
-                events.push(ServerMessage::AuctionConcluded {
-                    winner: Some(player_id),
-                    final_price,
-                });
-                events.push(ServerMessage::PropertyAcquired {
-                    player_id,
-                    tile_index: tile_idx,
-                    cost: final_price,
-                });
-                new_state.auction = None;
-                new_state.turn_phase = TurnPhase::TurnEnded;
+            if only_one_left {
+                close_auction(&mut new_state, &mut events);
             }
         }
 
@@ -402,37 +425,17 @@ pub fn apply_action(
                 .auction
                 .as_mut()
                 .ok_or(GameRuleError::NotInAuction)?;
-
+            if auction.highest_bidder == Some(player_id) {
+                return Err(GameRuleError::InvalidAction(
+                    "Bạn đang trả giá cao nhất".to_string(),
+                ));
+            }
             auction.active_bidders.retain(|&id| id != player_id);
-
-            if auction.active_bidders.len() <= 1 {
-                let winner = auction.highest_bidder;
-                let final_price = auction.current_bid;
-                let tile_idx = auction.tile_index;
-
-                if let Some(winner_id) = winner {
-                    if let Some(winner_player) = new_state.find_player_mut(winner_id) {
-                        winner_player.cash -= final_price;
-                        new_state.properties[tile_idx as usize].owner = Some(winner_id);
-                    }
-                    events.push(ServerMessage::AuctionConcluded {
-                        winner: Some(winner_id),
-                        final_price,
-                    });
-                    events.push(ServerMessage::PropertyAcquired {
-                        player_id: winner_id,
-                        tile_index: tile_idx,
-                        cost: final_price,
-                    });
-                } else {
-                    events.push(ServerMessage::AuctionConcluded {
-                        winner: None,
-                        final_price: Money::ZERO,
-                    });
-                }
-
-                new_state.auction = None;
-                new_state.turn_phase = TurnPhase::TurnEnded;
+            let remaining = auction.active_bidders.clone();
+            let leader = auction.highest_bidder;
+            // Kết thúc khi không còn ai ngoài người đang dẫn
+            if remaining.is_empty() || (remaining.len() == 1 && leader == Some(remaining[0])) {
+                close_auction(&mut new_state, &mut events);
             }
         }
 
@@ -648,10 +651,129 @@ pub fn apply_action(
         }
 
         ClientMessage::DeclareBankruptcy => {
-            handle_bankruptcy(&mut new_state, player_id, None, &mut events);
+            let creditors = new_state
+                .debt
+                .take()
+                .filter(|d| d.debtor == player_id)
+                .map(|d| d.creditors)
+                .unwrap_or_default();
+            let creditor = if creditors.len() == 1 {
+                Some(creditors[0])
+            } else {
+                None
+            };
+            // Tiền mặt còn lại chuyển cho chủ nợ
+            let cash = new_state
+                .find_player(player_id)
+                .map(|p| p.cash)
+                .unwrap_or(Money::ZERO);
+            if let Some(c) = creditor {
+                if let Some(cp) = new_state.find_player_mut(c) {
+                    cp.cash += cash;
+                }
+            }
+            handle_bankruptcy(&mut new_state, player_id, creditor, &mut events);
+        }
+
+        ClientMessage::PayDebt => {
+            let debt = match new_state.debt.clone() {
+                Some(d) if d.debtor == player_id && new_state.turn_phase == TurnPhase::Debt => d,
+                _ => {
+                    return Err(GameRuleError::InvalidAction(
+                        "Bạn không có khoản nợ nào".to_string(),
+                    ))
+                }
+            };
+            let cash = new_state
+                .find_player(player_id)
+                .map(|p| p.cash)
+                .unwrap_or(Money::ZERO);
+            if cash < debt.amount {
+                return Err(GameRuleError::InsufficientFunds {
+                    needed: debt.amount,
+                    available: cash,
+                });
+            }
+            settle(
+                &mut new_state,
+                player_id,
+                &debt.creditors,
+                debt.amount,
+                debt.tile_index,
+                &mut events,
+            );
+            new_state.debt = None;
+            new_state.turn_phase = TurnPhase::TurnEnded;
+        }
+
+        ClientMessage::ProposeTrade {
+            to,
+            give_tiles,
+            give_cash,
+            take_tiles,
+            take_cash,
+        } => {
+            if !matches!(
+                new_state.turn_phase,
+                TurnPhase::WaitingForRoll | TurnPhase::TurnEnded
+            ) {
+                return Err(GameRuleError::InvalidAction(
+                    "Chỉ giao dịch được trước khi lắc hoặc sau khi đi xong".to_string(),
+                ));
+            }
+            if new_state.trade.is_some() {
+                return Err(GameRuleError::InvalidAction(
+                    "Đang có một đề nghị chờ trả lời".to_string(),
+                ));
+            }
+            let offer = TradeOffer {
+                from: player_id,
+                to: *to,
+                give_tiles: give_tiles.clone(),
+                give_cash: *give_cash,
+                take_tiles: take_tiles.clone(),
+                take_cash: *take_cash,
+            };
+            validate_trade(&new_state, &offer)?;
+            new_state.trade = Some(offer);
+            events.push(ServerMessage::TradeProposed {
+                from: player_id,
+                to: *to,
+            });
+        }
+
+        ClientMessage::RespondTrade { accept } => {
+            let offer = new_state.trade.take().unwrap();
+            if *accept {
+                validate_trade(&new_state, &offer)?;
+                for &t in &offer.give_tiles {
+                    new_state.properties[t as usize].owner = Some(offer.to);
+                }
+                for &t in &offer.take_tiles {
+                    new_state.properties[t as usize].owner = Some(offer.from);
+                }
+                let net = offer.give_cash.0 - offer.take_cash.0;
+                new_state.find_player_mut(offer.from).unwrap().cash -= Money(net);
+                new_state.find_player_mut(offer.to).unwrap().cash += Money(net);
+            }
+            events.push(ServerMessage::TradeResolved {
+                from: offer.from,
+                to: offer.to,
+                accepted: *accept,
+            });
+        }
+
+        ClientMessage::CancelTrade => {
+            if new_state.trade.as_ref().map(|t| t.from) != Some(player_id) {
+                return Err(GameRuleError::InvalidAction(
+                    "Không có đề nghị nào để rút".to_string(),
+                ));
+            }
+            clear_trade(&mut new_state, &mut events);
         }
 
         ClientMessage::EndTurn => {
+            clear_trade(&mut new_state, &mut events);
             if new_state.turn_phase != TurnPhase::TurnEnded {
                 return Err(GameRuleError::InvalidPhase {
                     expected: "TurnEnded",
@@ -717,14 +839,8 @@ fn resolve_landing(
             state.turn_phase = TurnPhase::TurnEnded;
         }
         TileKind::Tax(t) => {
-            let tax_amount = t.amount;
-            let player = state.find_player_mut(player_id).unwrap();
-            if player.cash >= tax_amount {
-                player.cash -= tax_amount;
-                state.turn_phase = TurnPhase::TurnEnded;
-            } else {
-                handle_bankruptcy(state, player_id, None, events);
-            }
+            state.turn_phase = TurnPhase::TurnEnded;
+            charge(state, player_id, vec![], t.amount, Some(tile_index), events);
         }
         TileKind::Property(p) => {
             let prop_state = state.properties[tile_index as usize];
@@ -740,8 +856,8 @@ fn resolve_landing(
                         p.rent_table[0]
                     };
 
-                    pay_rent(state, player_id, owner_id, tile_index, rent, events);
                     state.turn_phase = TurnPhase::TurnEnded;
+                    pay_rent(state, player_id, owner_id, tile_index, rent, events);
                 }
             } else {
                 state.turn_phase = TurnPhase::TileActionPending;
@@ -757,8 +873,8 @@ fn resolve_landing(
                     let multiplier = 1i64 << (stations.saturating_sub(1));
                     let rent = Money::from_vnd(250_000 * multiplier);
 
-                    pay_rent(state, player_id, owner_id, tile_index, rent, events);
                     state.turn_phase = TurnPhase::TurnEnded;
+                    pay_rent(state, player_id, owner_id, tile_index, rent, events);
                 }
             } else {
                 state.turn_phase = TurnPhase::TileActionPending;
@@ -774,8 +890,8 @@ fn resolve_landing(
                     let mult = if utils >= 2 { 10i64 } else { 4i64 };
                     let rent = Money::from_vnd(mult * (dice_sum as i64) * 1_000);
 
-                    pay_rent(state, player_id, owner_id, tile_index, rent, events);
                     state.turn_phase = TurnPhase::TurnEnded;
+                    pay_rent(state, player_id, owner_id, tile_index, rent, events);
                 }
             } else {
                 state.turn_phase = TurnPhase::TileActionPending;
@@ -817,12 +933,11 @@ fn apply_card(
 
     match &card.effect {
         CardEffect::CashDelta(amount) => {
-            let player = state.find_player_mut(player_id).unwrap();
-            player.cash += *amount;
-            if player.cash < Money::ZERO {
-                handle_bankruptcy(state, player_id, None, events);
+            state.turn_phase = TurnPhase::TurnEnded;
+            if *amount >= Money::ZERO {
+                state.find_player_mut(player_id).unwrap().cash += *amount;
             } else {
-                state.turn_phase = TurnPhase::TurnEnded;
+                charge(state, player_id, vec![], Money(-amount.0), None, events);
             }
         }
         CardEffect::MoveTo(dest) => {
@@ -859,13 +974,8 @@ fn apply_card(
                     }
                 }
             }
-            let player = state.find_player_mut(player_id).unwrap();
-            if player.cash >= total {
-                player.cash -= total;
-                state.turn_phase = TurnPhase::TurnEnded;
-            } else {
-                handle_bankruptcy(state, player_id, None, events);
-            }
+            state.turn_phase = TurnPhase::TurnEnded;
+            charge(state, player_id, vec![], total, None, events);
         }
         CardEffect::CollectFromAll(amount) => {
             let active_others: Vec<PlayerId> = state
@@ -902,18 +1012,8 @@ fn apply_card(
                 .collect();
 
             let total_due = Money(amount.0 * active_others.len() as i64);
-            let player = state.find_player_mut(player_id).unwrap();
-
-            if player.cash >= total_due {
-                player.cash -= total_due;
-                for other_id in active_others {
-                    let other = state.find_player_mut(other_id).unwrap();
-                    other.cash += *amount;
-                }
-                state.turn_phase = TurnPhase::TurnEnded;
-            } else {
-                handle_bankruptcy(state, player_id, None, events);
-            }
+            state.turn_phase = TurnPhase::TurnEnded;
+            charge(state, player_id, active_others, total_due, None, events);
         }
     }
 }
@@ -926,33 +1026,200 @@ fn pay_rent(
     amount: Money,
     events: &mut Vec<ServerMessage>,
 ) {
-    let payer = state.find_player_mut(payer_id).unwrap();
-    if payer.cash >= amount {
-        payer.cash -= amount;
-        let recipient = state.find_player_mut(recipient_id).unwrap();
-        recipient.cash += amount;
+    charge(
+        state,
+        payer_id,
+        vec![recipient_id],
+        amount,
+        Some(tile_index),
+        events,
+    );
+}
 
-        events.push(ServerMessage::RentPaid {
-            payer: payer_id,
-            recipient: recipient_id,
-            tile_index,
+/// Chuyển `amount` từ `payer` cho các chủ nợ (chia đều; rỗng = ngân hàng).
+fn settle(
+    state: &mut GameState,
+    payer_id: PlayerId,
+    creditors: &[PlayerId],
+    amount: Money,
+    tile_index: Option<u8>,
+    events: &mut Vec<ServerMessage>,
+) {
+    state.find_player_mut(payer_id).unwrap().cash -= amount;
+    if creditors.is_empty() {
+        return;
+    }
+    let share = Money(amount.0 / creditors.len() as i64);
+    for &c in creditors {
+        if let Some(cp) = state.find_player_mut(c) {
+            cp.cash += share;
+        }
+    }
+    if let (Some(t), [single]) = (tile_index, creditors) {
+        if matches!(
+            get_board()[t as usize].kind,
+            TileKind::Property(_) | TileKind::Station(_) | TileKind::Utility(_)
+        ) {
+            events.push(ServerMessage::RentPaid {
+                payer: payer_id,
+                recipient: *single,
+                tile_index: t,
+                amount,
+            });
+        }
+    }
+}
+
+/// Thu tiền của người chơi. Đủ tiền mặt thì trả ngay; thiếu nhưng còn tài sản thì
+/// chuyển sang pha `Debt` để gom tiền; không thể gom đủ thì phá sản.
+/// Người gọi phải đặt `turn_phase` mong muốn (thường là `TurnEnded`) trước khi gọi.
+pub fn charge(
+    state: &mut GameState,
+    payer_id: PlayerId,
+    creditors: Vec<PlayerId>,
+    amount: Money,
+    tile_index: Option<u8>,
+    events: &mut Vec<ServerMessage>,
+) {
+    if amount <= Money::ZERO {
+        return;
+    }
+    let cash = state
+        .find_player(payer_id)
+        .map(|p| p.cash)
+        .unwrap_or(Money::ZERO);
+    if cash >= amount {
+        settle(state, payer_id, &creditors, amount, tile_index, events);
+        return;
+    }
+    if cash + state.liquidation_value(payer_id) >= amount {
+        events.push(ServerMessage::DebtIncurred {
+            debtor: payer_id,
+            creditor: if creditors.len() == 1 {
+                Some(creditors[0])
+            } else {
+                None
+            },
             amount,
         });
-    } else {
-        let partial = payer.cash;
-        payer.cash = Money::ZERO;
-        let recipient = state.find_player_mut(recipient_id).unwrap();
-        recipient.cash += partial;
-
-        events.push(ServerMessage::RentPaid {
-            payer: payer_id,
-            recipient: recipient_id,
+        state.debt = Some(DebtSession {
+            debtor: payer_id,
+            creditors,
+            amount,
             tile_index,
-            amount: partial,
         });
-
-        handle_bankruptcy(state, payer_id, Some(recipient_id), events);
+        state.turn_phase = TurnPhase::Debt;
+        return;
     }
+    // Không thể gom đủ: trả hết tiền mặt rồi phá sản
+    let creditor = if creditors.len() == 1 {
+        Some(creditors[0])
+    } else {
+        None
+    };
+    if cash > Money::ZERO {
+        settle(state, payer_id, &creditors, cash, tile_index, events);
+    }
+    handle_bankruptcy(state, payer_id, creditor, events);
+}
+
+/// Đóng phiên đấu giá: người trả giá cao nhất mua đất; không ai trả thì đất vẫn của ngân hàng.
+pub fn close_auction(state: &mut GameState, events: &mut Vec<ServerMessage>) {
+    let Some(auction) = state.auction.take() else {
+        return;
+    };
+    match auction.highest_bidder {
+        Some(winner) if auction.current_bid > Money::ZERO => {
+            if let Some(p) = state.find_player_mut(winner) {
+                p.cash -= auction.current_bid;
+            }
+            state.properties[auction.tile_index as usize].owner = Some(winner);
+            events.push(ServerMessage::AuctionConcluded {
+                winner: Some(winner),
+                final_price: auction.current_bid,
+            });
+            events.push(ServerMessage::PropertyAcquired {
+                player_id: winner,
+                tile_index: auction.tile_index,
+                cost: auction.current_bid,
+            });
+        }
+        _ => events.push(ServerMessage::AuctionConcluded {
+            winner: None,
+            final_price: Money::ZERO,
+        }),
+    }
+    state.turn_phase = TurnPhase::TurnEnded;
+}
+
+fn clear_trade(state: &mut GameState, events: &mut Vec<ServerMessage>) {
+    if let Some(t) = state.trade.take() {
+        events.push(ServerMessage::TradeResolved {
+            from: t.from,
+            to: t.to,
+            accepted: false,
+        });
+    }
+}
+
+fn validate_trade(state: &GameState, t: &TradeOffer) -> Result<(), GameRuleError> {
+    let invalid = |m: &str| Err(GameRuleError::InvalidAction(m.to_string()));
+    if t.from == t.to {
+        return invalid("Không thể giao dịch với chính mình");
+    }
+    let Some(to) = state.find_player(t.to) else {
+        return invalid("Người nhận không tồn tại");
+    };
+    if to.is_bankrupt {
+        return invalid("Người nhận đã phá sản");
+    }
+    if t.give_cash < Money::ZERO || t.take_cash < Money::ZERO {
+        return invalid("Số tiền không hợp lệ");
+    }
+    if t.give_tiles.is_empty()
+        && t.take_tiles.is_empty()
+        && t.give_cash == Money::ZERO
+        && t.take_cash == Money::ZERO
+    {
+        return invalid("Đề nghị đang trống");
+    }
+    let board = get_board();
+    let check_tiles = |tiles: &[u8], owner: PlayerId| -> Result<(), GameRuleError> {
+        for &tile in tiles {
+            let idx = tile as usize;
+            if idx >= 40 || state.properties[idx].owner != Some(owner) {
+                return Err(GameRuleError::NotPropertyOwner(tile));
+            }
+            if let TileKind::Property(p) = &board[idx].kind {
+                if get_district_tiles(p.district)
+                    .iter()
+                    .any(|&d| state.properties[d as usize].house_count > 0)
+                {
+                    return Err(GameRuleError::PropertyHasBuildings(tile));
+                }
+            }
+        }
+        Ok(())
+    };
+    check_tiles(&t.give_tiles, t.from)?;
+    check_tiles(&t.take_tiles, t.to)?;
+    let from_cash = state
+        .find_player(t.from)
+        .map(|p| p.cash)
+        .unwrap_or(Money::ZERO);
+    if from_cash < t.give_cash {
+        return Err(GameRuleError::InsufficientFunds {
+            needed: t.give_cash,
+            available: from_cash,
+        });
+    }
+    if to.cash < t.take_cash {
+        return Err(GameRuleError::InsufficientFunds {
+            needed: t.take_cash,
+            available: to.cash,
+        });
+    }
+    Ok(())
 }
 
 pub fn handle_bankruptcy(
@@ -964,6 +1231,16 @@ pub fn handle_bankruptcy(
     let bankrupt_player = state.find_player_mut(bankrupt_id).unwrap();
     bankrupt_player.is_bankrupt = true;
     bankrupt_player.cash = Money::ZERO;
+    state.debt = None;
+    state.doubles_count = 0;
+    if state
+        .trade
+        .as_ref()
+        .map(|t| t.from == bankrupt_id || t.to == bankrupt_id)
+        .unwrap_or(false)
+    {
+        state.trade = None;
+    }
 
     events.push(ServerMessage::PlayerBankrupt {
         player_id: bankrupt_id,
@@ -1012,7 +1289,7 @@ pub fn advance_turn(state: &mut GameState, events: &mut Vec<ServerMessage>) {
             state.turn_phase = TurnPhase::WaitingForRoll;
             events.push(ServerMessage::TurnStarted {
                 active_player: next_id,
-                time_limit_seconds: 30,
+                time_limit_seconds: 120,
             });
             break;
         }

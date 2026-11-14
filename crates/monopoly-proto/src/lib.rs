@@ -135,6 +135,22 @@ pub enum ClientMessage {
     },
     StartGame,
     AddBot,
+    /// Trả khoản nợ đang treo (sau khi đã bán nhà / thế chấp đủ tiền).
+    PayDebt,
+    /// Người đang tới lượt đề nghị trao đổi đất và tiền với một người chơi khác.
+    ProposeTrade {
+        to: PlayerId,
+        give_tiles: Vec<u8>,
+        give_cash: Money,
+        take_tiles: Vec<u8>,
+        take_cash: Money,
+    },
+    /// Người nhận đề nghị đồng ý hoặc từ chối.
+    RespondTrade {
+        accept: bool,
+    },
+    /// Người đề nghị rút lại đề nghị.
+    CancelTrade,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -214,5 +230,24 @@ pub enum ServerMessage {
     },
     ActionRejected {
         reason: String,
+    },
+    /// Người chơi không đủ tiền mặt nhưng còn tài sản để gom.
+    DebtIncurred {
+        debtor: PlayerId,
+        creditor: Option<PlayerId>,
+        amount: Money,
+    },
+    TradeProposed {
+        from: PlayerId,
+        to: PlayerId,
+    },
+    TradeResolved {
+        from: PlayerId,
+        to: PlayerId,
+        accepted: bool,
+    },
+    /// Đồng hồ phiên đấu giá (đặt lại mỗi lần có người trả giá).
+    AuctionTimer {
+        seconds_remaining: u32,
     },
 }

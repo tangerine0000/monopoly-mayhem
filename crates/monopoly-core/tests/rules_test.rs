@@ -327,3 +327,167 @@ fn test_decline_property_respects_auction_config_option() {
     assert!(state_declined.auction.is_none());
     assert!(events_declined.is_empty());
 }
+
+#[test]
+fn test_rent_without_cash_enters_debt_then_pays_after_mortgage() {
+    let (mut state, ids) = create_test_game();
+    let (debtor, owner) = (ids[0], ids[1]);
+    // Chủ có Nguyễn Huệ khách sạn (thuê 20tr); người nợ chỉ có 1tr nhưng có Ga Sài Gòn + Đồng Khởi
+    state.properties[39].owner = Some(owner);
+    state.properties[37].owner = Some(owner);
+    state.properties[39].house_count = 5;
+    state.properties[37].house_count = 4;
+    state.properties[15].owner = Some(debtor);
+    state.find_player_mut(debtor).unwrap().cash = Money::from_vnd(1_000_000);
+    state.find_player_mut(debtor).unwrap().position = 33;
+
+    // Không đủ cả khi gom hết -> phá sản ngay, tài sản về chủ nợ
+    let mut rng = create_seeded_rng(1);
+    let mut s1 = state.clone();
+    s1.find_player_mut(debtor).unwrap().position = 39;
+    let mut events = Vec::new();
+    monopoly_core::rules::charge(
+        &mut s1,
+        debtor,
+        vec![owner],
+        Money::from_vnd(20_000_000),
+        Some(39),
+        &mut events,
+    );
+    assert!(s1.find_player(debtor).unwrap().is_bankrupt);
+    assert_eq!(s1.properties[15].owner, Some(owner));
+
+    // Nợ 1,5tr: thiếu tiền mặt nhưng thế chấp ga (+1tr) là đủ -> pha Debt
+    let mut s2 = state.clone();
+    s2.turn_phase = TurnPhase::TurnEnded;
+    let mut events = Vec::new();
+    monopoly_core::rules::charge(
+        &mut s2,
+        debtor,
+        vec![owner],
+        Money::from_vnd(1_500_000),
+        Some(39),
+        &mut events,
+    );
+    assert_eq!(s2.turn_phase, TurnPhase::Debt);
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, ServerMessage::DebtIncurred { .. })));
+    // Trong pha nợ không được kết thúc lượt
+    assert!(apply_action(&s2, debtor, &ClientMessage::EndTurn, &mut rng).is_err());
+    // Chưa đủ tiền thì chưa trả được
+    assert!(apply_action(&s2, debtor, &ClientMessage::PayDebt, &mut rng).is_err());
+    let (s3, _) = apply_action(
+        &s2,
+        debtor,
+        &ClientMessage::MortgageProperty { tile_index: 15 },
+        &mut rng,
+    )
+    .unwrap();
+    let owner_cash_before = s3.find_player(owner).unwrap().cash;
+    let (s4, ev) = apply_action(&s3, debtor, &ClientMessage::PayDebt, &mut rng).unwrap();
+    assert_eq!(s4.turn_phase, TurnPhase::TurnEnded);
+    assert!(s4.debt.is_none());
+    assert_eq!(
+        s4.find_player(debtor).unwrap().cash,
+        Money::from_vnd(500_000)
+    );
+    assert_eq!(
+        s4.find_player(owner).unwrap().cash,
+        owner_cash_before + Money::from_vnd(1_500_000)
+    );
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, ServerMessage::RentPaid { .. })));
+}
+
+#[test]
+fn test_trade_propose_accept_and_validation() {
+    let (mut state, ids) = create_test_game();
+    let (a, b) = (ids[0], ids[1]);
+    state.properties[1].owner = Some(a);
+    state.properties[3].owner = Some(b);
+    let mut rng = create_seeded_rng(2);
+    let offer = ClientMessage::ProposeTrade {
+        to: b,
+        give_tiles: vec![1],
+        give_cash: Money::from_vnd(500_000),
+        take_tiles: vec![3],
+        take_cash: Money::ZERO,
+    };
+    // Người không tới lượt không được đề nghị
+    assert!(apply_action(&state, b, &offer, &mut rng).is_err());
+    let (s1, ev) = apply_action(&state, a, &offer, &mut rng).unwrap();
+    assert!(s1.trade.is_some());
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, ServerMessage::TradeProposed { .. })));
+    // Chỉ người nhận mới trả lời được
+    assert!(apply_action(
+        &s1,
+        ids[2],
+        &ClientMessage::RespondTrade { accept: true },
+        &mut rng
+    )
+    .is_err());
+    let (s2, _) = apply_action(
+        &s1,
+        b,
+        &ClientMessage::RespondTrade { accept: true },
+        &mut rng,
+    )
+    .unwrap();
+    assert_eq!(s2.properties[1].owner, Some(b));
+    assert_eq!(s2.properties[3].owner, Some(a));
+    assert_eq!(s2.find_player(a).unwrap().cash, Money::from_vnd(14_500_000));
+    assert_eq!(s2.find_player(b).unwrap().cash, Money::from_vnd(15_500_000));
+    assert!(s2.trade.is_none());
+
+    // Không được đổi đất không phải của mình, hoặc quận đã có nhà
+    let bad = ClientMessage::ProposeTrade {
+        to: b,
+        give_tiles: vec![3],
+        give_cash: Money::ZERO,
+        take_tiles: vec![],
+        take_cash: Money::ZERO,
+    };
+    assert!(apply_action(&state, a, &bad, &mut rng).is_err());
+    // Lắc xúc xắc tự hủy đề nghị đang treo
+    let (s5, ev) = apply_action(&s1, a, &ClientMessage::RollDice, &mut rng).unwrap();
+    assert!(s5.trade.is_none());
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        ServerMessage::TradeResolved {
+            accepted: false,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn test_auction_rejects_outsiders_and_self_overbid_and_closes() {
+    let (mut state, ids) = create_test_game();
+    state.find_player_mut(ids[0]).unwrap().position = 1;
+    state.turn_phase = TurnPhase::TileActionPending;
+    let mut rng = create_seeded_rng(3);
+    let (s, _) = apply_action(&state, ids[0], &ClientMessage::DeclineProperty, &mut rng).unwrap();
+    let bid = |amt: i64| ClientMessage::PlaceBid {
+        amount: Money::from_vnd(amt),
+    };
+    let (s, _) = apply_action(&s, ids[1], &bid(100_000), &mut rng).unwrap();
+    // Không được tự trả giá đè chính mình
+    assert!(apply_action(&s, ids[1], &bid(200_000), &mut rng).is_err());
+    let (s, _) = apply_action(&s, ids[2], &ClientMessage::PassAuction, &mut rng).unwrap();
+    // Người đã rời phiên không được trả giá lại
+    assert!(apply_action(&s, ids[2], &bid(300_000), &mut rng).is_err());
+    // Hết giờ: người dẫn đầu thắng
+    let mut s = s;
+    let mut events = Vec::new();
+    monopoly_core::rules::close_auction(&mut s, &mut events);
+    assert_eq!(s.properties[1].owner, Some(ids[1]));
+    assert_eq!(
+        s.find_player(ids[1]).unwrap().cash,
+        Money::from_vnd(14_900_000)
+    );
+    assert_eq!(s.turn_phase, TurnPhase::TurnEnded);
+}
