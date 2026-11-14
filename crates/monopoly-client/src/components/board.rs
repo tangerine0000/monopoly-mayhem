@@ -6,7 +6,7 @@ use crate::palette::{
     TILE_CHEST_INNER_BG, TILE_CORNER_ACCENT, TILE_CORNER_BG, TILE_SELECTED_STROKE, TILE_STATION,
     TILE_STROKE, TILE_TAX, TILE_TEXT_MUTED, TILE_TEXT_PRIMARY, TILE_UTILITY,
 };
-use leptos::*;
+use leptos::prelude::*;
 use monopoly_core::board::{get_board, get_district_tiles, TileKind};
 use monopoly_core::cards::{get_chance_deck, get_community_chest_deck, CardEffect};
 use monopoly_core::money::Money;
@@ -195,9 +195,9 @@ fn render_3d_die_cube(value: u8, rolling: bool, is_left: bool, is_doubles: bool)
                                     } else {
                                         "die-pip"
                                     };
-                                    view! { <span class=pip_cls></span> }.into_view()
+                                    view! { <span class=pip_cls></span> }.into_any()
                                 } else {
-                                    view! { <span></span> }.into_view()
+                                    view! { <span></span> }.into_any()
                                 }
                             }).collect_view()}
                         </div>
@@ -250,7 +250,7 @@ fn render_tile_illustration(
                         "+2.000.000 đ"
                     </text>
                 </g>
-            }.into_view()
+            }.into_any()
         }
         TileKind::Jail => {
             let jx = rx + w - 76.0;
@@ -263,7 +263,7 @@ fn render_tile_illustration(
                     <line x1=jx + 35.0 y1=jy + 8.0 x2=jx + 35.0 y2=jy + 50.0 stroke="#1c1a18" stroke-width="2" />
                     <line x1=jx + 46.0 y1=jy + 8.0 x2=jx + 46.0 y2=jy + 50.0 stroke="#1c1a18" stroke-width="2" />
                 </g>
-            }.into_view()
+            }.into_any()
         }
         TileKind::FreeParking => {
             let cx = rx + w / 2.0;
@@ -287,7 +287,7 @@ fn render_tile_illustration(
                     <circle cx=cx - 13.0 cy=cy + 13.0 r="5" fill="#1c1a18" />
                     <circle cx=cx + 13.0 cy=cy + 13.0 r="5" fill="#1c1a18" />
                 </g>
-            }.into_view()
+            }.into_any()
         }
         TileKind::GoToJail => {
             let cx = rx + w / 2.0;
@@ -299,7 +299,7 @@ fn render_tile_illustration(
                     <circle cx=cx cy=cy + 5.5 r="2.2" fill="#f5f0e4" />
                 </g>
             }
-            .into_view()
+            .into_any()
         }
         TileKind::Chance => {
             let (ix, iy) = if idx < 10 {
@@ -326,7 +326,7 @@ fn render_tile_illustration(
                     "?"
                 </text>
             }
-            .into_view()
+            .into_any()
         }
         TileKind::CommunityChest => {
             let (ix, iy) = if idx < 10 {
@@ -344,7 +344,7 @@ fn render_tile_illustration(
                     <line x1="-13" y1="-2" x2="13" y2="-2" stroke="#1c1a18" stroke-width="1.3" />
                     <rect x="-3" y="-5" width="6" height="6" rx="1" fill="#f2c94c" stroke="#1c1a18" stroke-width="0.8" />
                 </g>
-            }.into_view()
+            }.into_any()
         }
         TileKind::Station(_) => {
             let (ix, iy) = if idx < 10 {
@@ -364,7 +364,7 @@ fn render_tile_illustration(
                     <circle cx="-8" cy="8" r="3.5" fill="#d9383a" stroke="#1c1a18" stroke-width="1" />
                     <circle cx="4" cy="8" r="3.5" fill="#d9383a" stroke="#1c1a18" stroke-width="1" />
                 </g>
-            }.into_view()
+            }.into_any()
         }
         TileKind::Utility(_) => {
             let (ix, iy) = if idx < 10 {
@@ -382,13 +382,13 @@ fn render_tile_illustration(
                         <circle cx="0" cy="-3" r="8" fill="#f2c94c" stroke="#1c1a18" stroke-width="1.4" />
                         <rect x="-4" y="5" width="8" height="5" rx="1" fill="#6e6a63" stroke="#1c1a18" stroke-width="1" />
                     </g>
-                }.into_view()
+                }.into_any()
             } else {
                 view! {
                     <g transform=format!("translate({:.1}, {:.1})", ix, iy)>
                         <path d="M 0 -10 C 6 -2 9 3 9 6 A 9 9 0 1 1 -9 6 C -9 3 -6 -2 0 -10 Z" fill="#4a90b8" stroke="#1c1a18" stroke-width="1.3" />
                     </g>
-                }.into_view()
+                }.into_any()
             }
         }
         TileKind::Tax(_) => {
@@ -406,9 +406,9 @@ fn render_tile_illustration(
                     <polygon points="0,-10 10,0 0,10 -10,0" fill="#d49b35" stroke="#1c1a18" stroke-width="1.4" />
                     <circle cx="0" cy="0" r="3" fill="#f5f0e4" />
                 </g>
-            }.into_view()
+            }.into_any()
         }
-        TileKind::Property(_) => view! {}.into_view(),
+        TileKind::Property(_) => ().into_any(),
     }
 }
 
@@ -431,7 +431,7 @@ pub fn render_player_avatar_shapes(seat_idx: usize) -> impl IntoView {
                 <rect x="-4.2" y="-10.6" width="8.4" height="5.4" rx="1.2" fill="#18283a" />
                 <rect x="-4.2" y="-6.8" width="8.4" height="1.4" fill="#d4a853" />
             </g>
-        }.into_view(),
+        }.into_any(),
         1 => view! {
             // Seat 1: Modern Architect (Sleek hair + Round glasses + Ivory turtleneck)
             <g>
@@ -443,7 +443,7 @@ pub fn render_player_avatar_shapes(seat_idx: usize) -> impl IntoView {
                 <line x1="-0.4" y1="-0.5" x2="0.4" y2="-0.5" stroke="#18283a" stroke-width="0.9" />
                 <path d="M -1.4 2.1 Q 0 3.2 1.4 2.1" fill="none" stroke="#18283a" stroke-width="0.9" stroke-linecap="round" />
             </g>
-        }.into_view(),
+        }.into_any(),
         2 => view! {
             // Seat 2: Tech Courier (Helmet/Cap with visor + Cheerful smile)
             <g>
@@ -455,7 +455,7 @@ pub fn render_player_avatar_shapes(seat_idx: usize) -> impl IntoView {
                 <circle cx="1.6" cy="0.2" r="0.7" fill="#18283a" />
                 <path d="M -1.8 2 Q 0 3.4 1.8 2" fill="none" stroke="#18283a" stroke-width="1" stroke-linecap="round" />
             </g>
-        }.into_view(),
+        }.into_any(),
         _ => view! {
             // Seat 3: Saigon Merchant (Golden Nón Lá conical hat + Crimson collar)
             <g>
@@ -467,7 +467,7 @@ pub fn render_player_avatar_shapes(seat_idx: usize) -> impl IntoView {
                 <polygon points="-8.2,-1.6 0,-9.6 8.2,-1.6" fill="#f3d98b" stroke="#8c5f18" stroke-width="1.1" stroke-linejoin="round" />
                 <line x1="-6" y1="-2.2" x2="6" y2="-2.2" stroke="#c89232" stroke-width="0.8" />
             </g>
-        }.into_view(),
+        }.into_any(),
     };
 
     view! {
@@ -517,7 +517,7 @@ pub fn Board(
     #[prop(default = None)] on_action: Option<Callback<ClientMessage>>,
 ) -> impl IntoView {
     let board = get_board();
-    let (camera_mode, set_camera_mode) = create_signal(0u8);
+    let (camera_mode, set_camera_mode) = signal(0u8);
 
     view! {
         <div class="board-container">
@@ -551,7 +551,7 @@ pub fn Board(
                             title="Nhấn để lắc xúc xắc"
                             on:click=move |_| {
                                 if let Some(ref cb) = on_roll_dice {
-                                    cb.call(());
+                                    cb.run(());
                                 }
                             }
                         >
@@ -565,12 +565,12 @@ pub fn Board(
                 {move || {
                     let st = state.get();
                     if !st.is_game_started || st.is_game_over {
-                        return view! {}.into_view();
+                        return ().into_any();
                     }
 
                     let busy = is_rolling.get() || is_animating_move.get();
                     if busy {
-                        return view! {}.into_view();
+                        return ().into_any();
                     }
 
                     let my_id = my_player_id.get();
@@ -600,7 +600,7 @@ pub fn Board(
                                         </div>
                                     </div>
                                 </div>
-                            }.into_view();
+                            }.into_any();
                         }
                     }
 
@@ -679,7 +679,7 @@ pub fn Board(
                                                             disabled=move || my_cash < bid_50
                                                             on:click=move |_| {
                                                                 if let Some(cb) = on_act_50 {
-                                                                    cb.call(ClientMessage::PlaceBid { amount: bid_50 });
+                                                                    cb.run(ClientMessage::PlaceBid { amount: bid_50 });
                                                                 }
                                                             }
                                                         >
@@ -691,7 +691,7 @@ pub fn Board(
                                                             disabled=move || my_cash < bid_100
                                                             on:click=move |_| {
                                                                 if let Some(cb) = on_act_100 {
-                                                                    cb.call(ClientMessage::PlaceBid { amount: bid_100 });
+                                                                    cb.run(ClientMessage::PlaceBid { amount: bid_100 });
                                                                 }
                                                             }
                                                         >
@@ -703,7 +703,7 @@ pub fn Board(
                                                             disabled=move || my_cash < bid_500
                                                             on:click=move |_| {
                                                                 if let Some(cb) = on_act_500 {
-                                                                    cb.call(ClientMessage::PlaceBid { amount: bid_500 });
+                                                                    cb.run(ClientMessage::PlaceBid { amount: bid_500 });
                                                                 }
                                                             }
                                                         >
@@ -714,24 +714,24 @@ pub fn Board(
                                                             style="height: 34px; padding: 0 11px; font-size: 12px;"
                                                             on:click=move |_| {
                                                                 if let Some(cb) = on_act_pass {
-                                                                    cb.call(ClientMessage::PassAuction);
+                                                                    cb.run(ClientMessage::PassAuction);
                                                                 }
                                                             }
                                                         >
                                                             "Bỏ"
                                                         </button>
                                                     </div>
-                                                }.into_view()
+                                                }.into_any()
                                             } else {
                                                 view! {
                                                     <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>
                                                         "Bạn đã rời phiên đấu giá này"
                                                     </span>
-                                                }.into_view()
+                                                }.into_any()
                                             }}
                                         </div>
                                     </div>
-                                }.into_view();
+                                }.into_any();
                             }
                         }
                     }
@@ -826,7 +826,7 @@ pub fn Board(
                                                     class="stage-link-btn"
                                                     on:click=move |_| {
                                                         if let Some(cb) = on_inspect {
-                                                            cb.call(tile_idx);
+                                                            cb.run(tile_idx);
                                                         }
                                                     }
                                                 >
@@ -839,7 +839,7 @@ pub fn Board(
                                                         disabled=move || !can_buy
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_buy {
-                                                                cb.call(ClientMessage::BuyProperty);
+                                                                cb.run(ClientMessage::BuyProperty);
                                                             }
                                                         }
                                                     >
@@ -850,7 +850,7 @@ pub fn Board(
                                                         style="height: 36px;"
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_decline {
-                                                                cb.call(ClientMessage::DeclineProperty);
+                                                                cb.run(ClientMessage::DeclineProperty);
                                                             }
                                                         }
                                                     >
@@ -859,7 +859,7 @@ pub fn Board(
                                                 </div>
                                             </div>
                                         </div>
-                                    }.into_view();
+                                    }.into_any();
                                 }
                             }
                         }
@@ -877,22 +877,22 @@ pub fn Board(
                                         <PlayerAvatar seat_idx=seat_idx size=20 />
                                         <span>
                                             {if local {
-                                                format!("Đang chờ {}…", cur_name).into_view()
+                                                format!("Đang chờ {}…", cur_name).into_any()
                                             } else {
                                                 let name_for_timer = cur_name.clone();
                                                 (move || {
                                                     let t_sec = timer_seconds.get();
                                                     format!("Đang chờ {}… ({}:{:02})", name_for_timer, t_sec / 60, t_sec % 60)
-                                                }).into_view()
+                                                }).into_any()
                                             }}
                                         </span>
                                     </div>
                                 </div>
-                            }.into_view();
+                            }.into_any();
                         }
                     }
 
-                    view! {}.into_view()
+                    ().into_any()
                 }}
 
             <svg class="board-svg" viewBox="0 0 1280 960" preserveAspectRatio="xMidYMid meet">
@@ -1103,7 +1103,7 @@ pub fn Board(
                             style="cursor: pointer;"
                             on:click=move |_| {
                                 if let Some(ref cb) = on_roll_dice {
-                                    cb.call(());
+                                    cb.run(());
                                 }
                             }
                         >
@@ -1239,7 +1239,7 @@ pub fn Board(
                     view! {
                         <g class="tile-rect" on:click=move |_| {
                             if let Some(ref cb) = on_tile_click {
-                                cb.call(idx);
+                                cb.run(idx);
                             }
                         }>
                             <rect
@@ -1290,7 +1290,7 @@ pub fn Board(
                                         <rect x=hx y=hy width=hw height=hh fill=h_col stroke=TILE_STROKE stroke-width="1" />
                                         <rect x=hx + 1.0 y=hy + 1.0 width=(hw - 2.0).max(1.0) height="3" fill="rgba(255,255,255,0.22)" />
                                     </g>
-                                }.into_view()
+                                }.into_any()
                             } else {
                                 let (inner_fill, inner_stroke, inner_sw) = match &tile_kind {
                                     TileKind::Chance => (TILE_CHANCE_INNER_BG, TILE_CHANCE_BORDER, "1.4"),
@@ -1308,7 +1308,7 @@ pub fn Board(
                                         stroke-width=inner_sw
                                         rx="4"
                                     />
-                                }.into_view()
+                                }.into_any()
                             }}
 
 
@@ -1344,9 +1344,9 @@ pub fn Board(
                                     >
                                         {price_text}
                                     </text>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                view! {}.into_view()
+                                ().into_any()
                             }}
 
 
@@ -1363,9 +1363,9 @@ pub fn Board(
                                         >
                                             {render_player_avatar_shapes(p_idx)}
                                         </g>
-                                    }.into_view()
+                                    }.into_any()
                                 } else {
-                                    view! {}.into_view()
+                                    ().into_any()
                                 }
                             }}
 
@@ -1401,7 +1401,7 @@ pub fn Board(
                                                         <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx + 2.0, hy - 3.0, hx + 6.0, hy - 5.0, hx + 6.0, hy + 2.0, hx + 2.0, hy + 4.0) fill="#9e2426" />
                                                         <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx - 5.0, hy - 3.0, hx - 1.0, hy - 5.0, hx + 6.0, hy - 5.0, hx + 2.0, hy - 3.0) fill="#f2c94c" />
                                                     </g>
-                                                }.into_view()
+                                                }.into_any()
                                             } else {
                                                 // 3D Isometric House
                                                 let hx = tx - 21.0;
@@ -1412,7 +1412,7 @@ pub fn Board(
                                                         <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx + 1.0, hy - 2.0, hx + 4.5, hy - 4.0, hx + 4.5, hy + 1.0, hx + 1.0, hy + 3.0) fill="#28754f" />
                                                         <polygon points=format!("{:.1},{:.1} {:.1},{:.1} {:.1},{:.1}", hx - 4.5, hy - 2.0, hx - 1.5, hy - 5.5, hx + 1.5, hy - 2.0) fill="#5ce09b" />
                                                     </g>
-                                                }.into_view()
+                                                }.into_any()
                                             }}
 
                                             <text
@@ -1427,7 +1427,7 @@ pub fn Board(
                                                 {label_str}
                                             </text>
                                         </g>
-                                    }.into_view()
+                                    }.into_any()
                                 } else if is_mortgaged() {
                                     view! {
                                         <text
@@ -1441,9 +1441,9 @@ pub fn Board(
                                         >
                                             "Thế chấp"
                                         </text>
-                                    }.into_view()
+                                    }.into_any()
                                 } else {
-                                    view! {}.into_view()
+                                    ().into_any()
                                 }
                             }}
 
@@ -1467,9 +1467,9 @@ pub fn Board(
                                     stroke-width="2"
                                 />
                             </g>
-                        }.into_view()
+                        }.into_any()
                     } else {
-                        view! {}.into_view()
+                        ().into_any()
                     }
                 }}
 
@@ -1483,7 +1483,7 @@ pub fn Board(
 
                     st.players.into_iter().enumerate().map(|(p_idx, player)| {
                         if player.is_bankrupt {
-                            return view! { <g></g> }.into_view();
+                            return view! { <g></g> }.into_any();
                         }
                         let vis_pos = positions[p_idx % 4];
                         let (cx, cy) = get_tile_center(vis_pos);
@@ -1526,9 +1526,9 @@ pub fn Board(
                                             stroke-width="2"
                                             opacity="0.9"
                                         />
-                                    }.into_view()
+                                    }.into_any()
                                 } else {
-                                    view! {}.into_view()
+                                    ().into_any()
                                 }}
 
 
@@ -1555,7 +1555,7 @@ pub fn Board(
                                     </g>
                                 </g>
                             </g>
-                        }.into_view()
+                        }.into_any()
                     }).collect_view()
                 }}
 
@@ -1612,7 +1612,7 @@ pub fn Board(
 
                 let close_card = move || {
                     if let Some(ref cb) = on_tile_click {
-                        cb.call(sel_idx);
+                        cb.run(sel_idx);
                     }
                 };
 
@@ -1691,7 +1691,7 @@ pub fn Board(
                                     }).collect_view()}
                                 </div>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }
                     TileKind::Property(p) => {
                         let owner_view = if let Some(owner_id) = prop_state.owner {
@@ -1703,12 +1703,12 @@ pub fn Board(
                                             {owner.name.clone()}
                                         </span>
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                view! { <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>"Đã có chủ"</span> }.into_view()
+                                view! { <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>"Đã có chủ"</span> }.into_any()
                             }
                         } else {
-                            view! { <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>"Chưa có chủ · Ngân hàng"</span> }.into_view()
+                            view! { <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>"Chưa có chủ · Ngân hàng"</span> }.into_any()
                         };
 
                         let (primary_label, primary_value, primary_col) = if prop_state.is_mortgaged {
@@ -1787,7 +1787,7 @@ pub fn Board(
                                     <span>{format!("Thế chấp: {}", p.mortgage_value)}</span>
                                 </div>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }
                     TileKind::Station(s) => {
                         let owner_cnt = prop_state.owner.map(|oid| st.stations_owned_by(oid)).unwrap_or(0);
@@ -1813,10 +1813,10 @@ pub fn Board(
                                                     <PlayerAvatar seat_idx=p_idx size=22 />
                                                     <span style=format!("font-size: 13px; font-weight: 600; color: {};", TEXT_PRIMARY)>{owner.name.clone()}</span>
                                                 </div>
-                                            }.into_view()
-                                        } else { view! {}.into_view() }
+                                            }.into_any()
+                                        } else { ().into_any() }
                                     } else {
-                                        view! { <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>"Ngân hàng"</span> }.into_view()
+                                        view! { <span style=format!("font-size: 12px; color: {};", TEXT_MUTED)>"Ngân hàng"</span> }.into_any()
                                     }}
 
                                 </div>
@@ -1830,7 +1830,7 @@ pub fn Board(
                                     {format!("Giá trị thế chấp: {}", s.mortgage_value)}
                                 </div>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }
                     TileKind::Utility(u) => {
                         let owner_cnt = prop_state.owner.map(|oid| st.utilities_owned_by(oid)).unwrap_or(0);
@@ -1858,7 +1858,7 @@ pub fn Board(
                                     {format!("Giá trị thế chấp: {}", u.mortgage_value)}
                                 </div>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }
                     TileKind::Tax(t) => view! {
                         <div class="deed-2d-body">
@@ -1869,7 +1869,7 @@ pub fn Board(
                                 </div>
                             </div>
                         </div>
-                    }.into_view(),
+                    }.into_any(),
                     _ => {
                         let desc = match &tile.kind {
                             TileKind::Go => "Đi qua hoặc dừng lại ô này được nhận +2.000.000 đ tiền lương.",
@@ -1884,7 +1884,7 @@ pub fn Board(
                                     <span style=format!("font-size: 13px; line-height: 20px; color: {};", TEXT_SECONDARY)>{desc}</span>
                                 </div>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }
                 };
 
@@ -1950,7 +1950,7 @@ pub fn Board(
                                                 disabled=move || !can_build
                                                 on:click=move |_| {
                                                     if let Some(cb) = on_b {
-                                                        cb.call(ClientMessage::BuildHouse { tile_index: sel_idx });
+                                                        cb.run(ClientMessage::BuildHouse { tile_index: sel_idx });
                                                     }
                                                 }
                                             >
@@ -1964,13 +1964,13 @@ pub fn Board(
                                                         disabled=move || !can_sell
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_s {
-                                                                cb.call(ClientMessage::SellHouse { tile_index: sel_idx });
+                                                                cb.run(ClientMessage::SellHouse { tile_index: sel_idx });
                                                             }
                                                         }
                                                     >
                                                         {format!("Bán nhà (+{})", sell_refund)}
                                                     </button>
-                                                }.into_view()
+                                                }.into_any()
                                             } else if prop_state.is_mortgaged {
                                                 view! {
                                                     <button
@@ -1979,13 +1979,13 @@ pub fn Board(
                                                         disabled=move || !can_unmortgage
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_u {
-                                                                cb.call(ClientMessage::UnmortgageProperty { tile_index: sel_idx });
+                                                                cb.run(ClientMessage::UnmortgageProperty { tile_index: sel_idx });
                                                             }
                                                         }
                                                     >
                                                         {format!("Chuộc ({})", unmortgage_cost)}
                                                     </button>
-                                                }.into_view()
+                                                }.into_any()
                                             } else {
                                                 view! {
                                                     <button
@@ -1994,18 +1994,18 @@ pub fn Board(
                                                         disabled=move || !can_mortgage
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_m {
-                                                                cb.call(ClientMessage::MortgageProperty { tile_index: sel_idx });
+                                                                cb.run(ClientMessage::MortgageProperty { tile_index: sel_idx });
                                                             }
                                                         }
                                                     >
                                                         {format!("Thế chấp (+{})", p.mortgage_value)}
                                                     </button>
-                                                }.into_view()
+                                                }.into_any()
                                             }}
                                         </div>
                                         {hint.map(|h| view! { <span class="deed-2d-action-hint">{h}</span> })}
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             }
                             TileKind::Station(s) => {
                                 let m_val = s.mortgage_value;
@@ -2025,13 +2025,13 @@ pub fn Board(
                                                         disabled=move || !can_u
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_u {
-                                                                cb.call(ClientMessage::UnmortgageProperty { tile_index: sel_idx });
+                                                                cb.run(ClientMessage::UnmortgageProperty { tile_index: sel_idx });
                                                             }
                                                         }
                                                     >
                                                         {format!("Chuộc lại ({})", unm_cost)}
                                                     </button>
-                                                }.into_view()
+                                                }.into_any()
                                             } else {
                                                 view! {
                                                     <button
@@ -2040,17 +2040,17 @@ pub fn Board(
                                                         disabled=move || !can_m
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_m {
-                                                                cb.call(ClientMessage::MortgageProperty { tile_index: sel_idx });
+                                                                cb.run(ClientMessage::MortgageProperty { tile_index: sel_idx });
                                                             }
                                                         }
                                                     >
                                                         {format!("Thế chấp (+{})", m_val)}
                                                     </button>
-                                                }.into_view()
+                                                }.into_any()
                                             }}
                                         </div>
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             }
                             TileKind::Utility(u) => {
                                 let m_val = u.mortgage_value;
@@ -2070,13 +2070,13 @@ pub fn Board(
                                                         disabled=move || !can_u
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_u {
-                                                                cb.call(ClientMessage::UnmortgageProperty { tile_index: sel_idx });
+                                                                cb.run(ClientMessage::UnmortgageProperty { tile_index: sel_idx });
                                                             }
                                                         }
                                                     >
                                                         {format!("Chuộc lại ({})", unm_cost)}
                                                     </button>
-                                                }.into_view()
+                                                }.into_any()
                                             } else {
                                                 view! {
                                                     <button
@@ -2085,25 +2085,25 @@ pub fn Board(
                                                         disabled=move || !can_m
                                                         on:click=move |_| {
                                                             if let Some(cb) = on_m {
-                                                                cb.call(ClientMessage::MortgageProperty { tile_index: sel_idx });
+                                                                cb.run(ClientMessage::MortgageProperty { tile_index: sel_idx });
                                                             }
                                                         }
                                                     >
                                                         {format!("Thế chấp (+{})", m_val)}
                                                     </button>
-                                                }.into_view()
+                                                }.into_any()
                                             }}
                                         </div>
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             }
-                            _ => view! {}.into_view(),
+                            _ => ().into_any(),
                         }
                     } else {
-                        view! {}.into_view()
+                        ().into_any()
                     }
                 } else {
-                    view! {}.into_view()
+                    ().into_any()
                 };
 
                 Some(view! {

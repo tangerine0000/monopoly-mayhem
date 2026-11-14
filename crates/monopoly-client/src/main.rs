@@ -4,7 +4,7 @@ pub mod palette;
 mod ws;
 
 use app::App;
-use leptos::*;
+use leptos::prelude::*;
 
 fn main() {
     console_error_panic_hook::set_once();

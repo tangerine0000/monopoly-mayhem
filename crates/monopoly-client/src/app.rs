@@ -5,7 +5,7 @@ use crate::palette::{
     STATUS_SUCCESS, STATUS_WARNING, SURFACE_HOVER, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::ws::{get_storage_session_token, save_storage_session_token, WsClient};
-use leptos::*;
+use leptos::prelude::*;
 use monopoly_core::board::{get_board, District, TileKind};
 use monopoly_core::money::Money;
 use monopoly_core::rules::apply_action;
@@ -244,9 +244,9 @@ fn execute_local_action(
             set_local_state.set(new_state.clone());
 
             for ev in events {
-                on_msg.call(ev);
+                on_msg.run(ev);
             }
-            on_msg.call(ServerMessage::SyncSnapshot {
+            on_msg.run(ServerMessage::SyncSnapshot {
                 state: serde_json::to_value(&new_state).unwrap_or_default(),
             });
 
@@ -361,7 +361,7 @@ fn execute_local_action(
             }
         }
         Err(e) => {
-            on_msg.call(ServerMessage::ActionRejected {
+            on_msg.run(ServerMessage::ActionRejected {
                 reason: e.to_string(),
             });
         }
@@ -370,10 +370,10 @@ fn execute_local_action(
 
 #[component]
 pub fn App() -> impl IntoView {
-    let (view_mode, set_view_mode) = create_signal(ViewMode::Lobby);
-    let (lobby_tab, set_lobby_tab) = create_signal(LobbyTab::Online);
-    let (local_player_count, set_local_player_count) = create_signal(2usize);
-    let (local_slots, set_local_slots) = create_signal(vec![
+    let (view_mode, set_view_mode) = signal(ViewMode::Lobby);
+    let (lobby_tab, set_lobby_tab) = signal(LobbyTab::Online);
+    let (local_player_count, set_local_player_count) = signal(2usize);
+    let (local_slots, set_local_slots) = signal(vec![
         LocalPlayerSlot {
             name: "Người chơi 1".to_string(),
             is_bot: false,
@@ -397,54 +397,52 @@ pub fn App() -> impl IntoView {
             uuid::Uuid::new_v4().to_string()[..4].to_uppercase()
         )
     };
-    let (player_name, set_player_name) = create_signal(String::new());
-    let (room_id, set_room_id) = create_signal(generate_random_room_code());
-    let (enable_auction_config, set_enable_auction_config) = create_signal(false);
-    let (online_max_players, set_online_max_players) = create_signal(4u8);
-    let (online_add_bots, set_online_add_bots) = create_signal(false);
-    let (online_bot_count, set_online_bot_count) = create_signal(1u8);
-    let (pending_host_setup, set_pending_host_setup) =
-        create_signal::<Option<(bool, u8, u8)>>(None);
-    let (game_state, set_game_state) = create_signal(GameState::new());
-    let (my_player_id, set_my_player_id) = create_signal::<Option<PlayerId>>(None);
-    let (timer_seconds, set_timer_seconds) = create_signal(120u32);
-    let (logs, set_logs) = create_signal(vec!["Phiên bàn cờ đã sẵn sàng".to_string()]);
-    let (show_history, set_show_history) = create_signal(false);
-    let (show_rules, set_show_rules) = create_signal(false);
-    let (selected_tile, set_selected_tile) = create_signal::<Option<u8>>(None);
-    let (sound_muted, set_sound_muted) = create_signal(false);
-    let (ui_template, set_ui_template) = create_signal(load_ui_template());
+    let (player_name, set_player_name) = signal(String::new());
+    let (room_id, set_room_id) = signal(generate_random_room_code());
+    let (enable_auction_config, set_enable_auction_config) = signal(false);
+    let (online_max_players, set_online_max_players) = signal(4u8);
+    let (online_add_bots, set_online_add_bots) = signal(false);
+    let (online_bot_count, set_online_bot_count) = signal(1u8);
+    let (pending_host_setup, set_pending_host_setup) = signal::<Option<(bool, u8, u8)>>(None);
+    let (game_state, set_game_state) = signal(GameState::new());
+    let (my_player_id, set_my_player_id) = signal::<Option<PlayerId>>(None);
+    let (timer_seconds, set_timer_seconds) = signal(120u32);
+    let (logs, set_logs) = signal(vec!["Phiên bàn cờ đã sẵn sàng".to_string()]);
+    let (show_history, set_show_history) = signal(false);
+    let (show_rules, set_show_rules) = signal(false);
+    let (selected_tile, set_selected_tile) = signal::<Option<u8>>(None);
+    let (sound_muted, set_sound_muted) = signal(false);
+    let (ui_template, set_ui_template) = signal(load_ui_template());
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let tpl = ui_template.get();
         apply_ui_template_to_dom(tpl);
         save_ui_template(tpl);
     });
 
     // Animation signals for sequenced dice tumble, step-by-step pawn hopping, trail, and popups
-    let (is_rolling, set_is_rolling) = create_signal(false);
-    let (is_animating_move, set_is_animating_move) = create_signal(false);
-    let (display_dice, set_display_dice) = create_signal((1u8, 1u8));
-    let (visual_positions, set_visual_positions) = create_signal([0u8; 4]);
-    let (hopping_seat, set_hopping_seat) = create_signal::<Option<usize>>(None);
-    let (step_trail, set_step_trail) = create_signal::<Vec<u8>>(Vec::new());
-    let (landing_tile_burst, set_landing_tile_burst) = create_signal::<Option<u8>>(None);
-    let (recent_acquired_tile, set_recent_acquired_tile) = create_signal::<Option<u8>>(None);
-    let (recent_house_tile, set_recent_house_tile) = create_signal::<Option<u8>>(None);
-    let (floating_popups, set_floating_popups) =
-        create_signal::<Vec<BoardFloatingPopup>>(Vec::new());
-    let (popup_seq, set_popup_seq) = create_signal(1u64);
-    let (cash_delta_badge, set_cash_delta_badge) = create_signal::<Option<(String, bool)>>(None);
+    let (is_rolling, set_is_rolling) = signal(false);
+    let (is_animating_move, set_is_animating_move) = signal(false);
+    let (display_dice, set_display_dice) = signal((1u8, 1u8));
+    let (visual_positions, set_visual_positions) = signal([0u8; 4]);
+    let (hopping_seat, set_hopping_seat) = signal::<Option<usize>>(None);
+    let (step_trail, set_step_trail) = signal::<Vec<u8>>(Vec::new());
+    let (landing_tile_burst, set_landing_tile_burst) = signal::<Option<u8>>(None);
+    let (recent_acquired_tile, set_recent_acquired_tile) = signal::<Option<u8>>(None);
+    let (recent_house_tile, set_recent_house_tile) = signal::<Option<u8>>(None);
+    let (floating_popups, set_floating_popups) = signal::<Vec<BoardFloatingPopup>>(Vec::new());
+    let (popup_seq, set_popup_seq) = signal(1u64);
+    let (cash_delta_badge, set_cash_delta_badge) = signal::<Option<(String, bool)>>(None);
     let (drawn_card_banner, set_drawn_card_banner) =
-        create_signal::<Option<(String, String, String)>>(None);
-    let (card_banner_seq, set_card_banner_seq) = create_signal(0u64);
+        signal::<Option<(String, String, String)>>(None);
+    let (card_banner_seq, set_card_banner_seq) = signal(0u64);
 
     // Buffered state/card while dice tumble & pawn hops so UI updates right when landing
-    let (pending_snapshot, set_pending_snapshot) = create_signal::<Option<GameState>>(None);
-    let (pending_card, set_pending_card) = create_signal::<Option<(String, String, String)>>(None);
+    let (pending_snapshot, set_pending_snapshot) = signal::<Option<GameState>>(None);
+    let (pending_card, set_pending_card) = signal::<Option<(String, String, String)>>(None);
 
-    let (ws_client, set_ws_client) = create_signal::<Option<Rc<WsClient>>>(None);
-    let (error_toast, set_error_toast) = create_signal::<Option<String>>(None);
+    let (ws_client, set_ws_client) = signal_local::<Option<Rc<WsClient>>>(None);
+    let (error_toast, set_error_toast) = signal::<Option<String>>(None);
 
     let add_log = move |msg: String| {
         set_logs.update(|l| l.push(msg));
@@ -513,9 +511,8 @@ pub fn App() -> impl IntoView {
         );
     };
 
-    let (is_local_mode, set_is_local_mode) = create_signal(false);
-    let (local_authoritative_state, set_local_authoritative_state) =
-        create_signal(GameState::new());
+    let (is_local_mode, set_is_local_mode) = signal(false);
+    let (local_authoritative_state, set_local_authoritative_state) = signal(GameState::new());
 
     let process_server_message = Callback::new(move |server_msg: ServerMessage| match server_msg {
         ServerMessage::RoomJoined {
@@ -1094,7 +1091,7 @@ pub fn App() -> impl IntoView {
             normalized_room,
             trimmed_name,
             move |server_msg| {
-                process_server_message.call(server_msg);
+                process_server_message.run(server_msg);
             },
             move || {
                 if my_player_id.get_untracked().is_none() && !is_local_mode.get_untracked() {
@@ -1152,34 +1149,34 @@ pub fn App() -> impl IntoView {
         if is_local_mode.get_untracked() {
             match cur.turn_phase {
                 TurnPhase::WaitingForRoll => {
-                    handle_action.call(ClientMessage::RollDice);
+                    handle_action.run(ClientMessage::RollDice);
                 }
                 TurnPhase::TileActionPending => {
                     if cur.players.len() == 1 {
-                        handle_action.call(ClientMessage::DeclineProperty);
-                        handle_action.call(ClientMessage::RollDice);
+                        handle_action.run(ClientMessage::DeclineProperty);
+                        handle_action.run(ClientMessage::RollDice);
                     } else if !cur.config.enable_auction {
-                        handle_action.call(ClientMessage::DeclineProperty);
+                        handle_action.run(ClientMessage::DeclineProperty);
                     }
                 }
                 TurnPhase::TurnEnded => {
-                    handle_action.call(ClientMessage::EndTurn);
+                    handle_action.run(ClientMessage::EndTurn);
                     if cur.players.len() == 1 {
-                        handle_action.call(ClientMessage::RollDice);
+                        handle_action.run(ClientMessage::RollDice);
                     }
                 }
                 TurnPhase::Auction => {}
             }
         } else {
             match cur.turn_phase {
-                TurnPhase::WaitingForRoll => handle_action.call(ClientMessage::RollDice),
-                TurnPhase::TurnEnded => handle_action.call(ClientMessage::EndTurn),
+                TurnPhase::WaitingForRoll => handle_action.run(ClientMessage::RollDice),
+                TurnPhase::TurnEnded => handle_action.run(ClientMessage::EndTurn),
                 _ => {}
             }
         }
     });
 
-    let _keydown_handle = window_event_listener(ev::keydown, move |ev| {
+    let _keydown_handle = window_event_listener(leptos::ev::keydown, move |ev| {
         let key = ev.key();
         if key == "Escape" {
             set_selected_tile.set(None);
@@ -1208,7 +1205,7 @@ pub fn App() -> impl IntoView {
                 && st.turn_phase == TurnPhase::WaitingForRoll
             {
                 ev.prevent_default();
-                trigger_roll_dice.call(());
+                trigger_roll_dice.run(());
             }
         }
     });
@@ -1301,9 +1298,9 @@ pub fn App() -> impl IntoView {
                                                 <span class="mono ui-cash-delta" style=format!("font-size: 11px; color: {};", col)>
                                                     {delta_txt}
                                                 </span>
-                                            }.into_view()
+                                            }.into_any()
                                         } else {
-                                            view! {}.into_view()
+                                            ().into_any()
                                         }
                                     }}
                                 </div>
@@ -1355,9 +1352,9 @@ pub fn App() -> impl IntoView {
                                 >
                                     "Về sảnh"
                                 </button>
-                            }.into_view()
+                            }.into_any()
                         } else {
-                            view! {}.into_view()
+                            ().into_any()
                         }
                     }}
                     {move || {
@@ -1375,9 +1372,9 @@ pub fn App() -> impl IntoView {
                                         "Đóng"
                                     </button>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         } else {
-                            view! {}.into_view()
+                            ().into_any()
                         }
                     }}
                 </div>
@@ -1591,9 +1588,9 @@ pub fn App() -> impl IntoView {
                                                                             }).collect_view()}
                                                                         </div>
                                                                     </div>
-                                                                }.into_view()
+                                                                }.into_any()
                                                             } else {
-                                                                view! {}.into_view()
+                                                                ().into_any()
                                                             }}
                                                         </div>
 
@@ -1667,7 +1664,7 @@ pub fn App() -> impl IntoView {
                                                             </button>
                                                         </div>
                                                     </div>
-                                                }.into_view(),
+                                                }.into_any(),
                                                 LobbyTab::Local => view! {
                                                     <div style="display: flex; flex-direction: column; gap: 14px;">
                                                         <div style="display: flex; flex-direction: column; gap: 8px;">
@@ -1744,13 +1741,13 @@ pub fn App() -> impl IntoView {
                                                                                             if is_bot { "Máy AI" } else { "Người" }
                                                                                         }}
                                                                                     </button>
-                                                                                }.into_view()
+                                                                                }.into_any()
                                                                             } else {
                                                                                 view! {
                                                                                     <span class="mono" style=format!("width: 88px; text-align: center; font-size: 12px; color: {}; flex-shrink: 0;", TEXT_MUTED)>
                                                                                         "Chủ bàn"
                                                                                     </span>
-                                                                                }.into_view()
+                                                                                }.into_any()
                                                                             }}
                                                                         </div>
                                                                     }
@@ -1777,9 +1774,9 @@ pub fn App() -> impl IntoView {
                                                                         {move || if enable_auction_config.get() { "Đang bật" } else { "Đang tắt" }}
                                                                     </span>
                                                                 </div>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         } else {
-                                                            view! {}.into_view()
+                                                            ().into_any()
                                                         }}
 
                                                         <div style="display: flex; gap: 10px; margin-top: 2px;">
@@ -1802,13 +1799,13 @@ pub fn App() -> impl IntoView {
                                                             </button>
                                                         </div>
                                                     </div>
-                                                }.into_view(),
+                                                }.into_any(),
                                             }}
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }
                     ViewMode::Game => {
                         view! {
@@ -1816,7 +1813,7 @@ pub fn App() -> impl IntoView {
                                 {move || {
                                     let st = game_state.get();
                                     if !st.is_game_started {
-                                        return view! {}.into_view();
+                                        return ().into_any();
                                     }
                                     let cur_id = st.current_player().map(|p| p.id);
                                     let my_id = my_player_id.get();
@@ -1896,16 +1893,16 @@ pub fn App() -> impl IntoView {
                                                                             }
                                                                         }).collect_view()}
                                                                     </div>
-                                                                }.into_view()
+                                                                }.into_any()
                                                             } else {
-                                                                view! {}.into_view()
+                                                                ().into_any()
                                                             }}
                                                         </div>
                                                     </div>
                                                 }
                                             }).collect_view()}
                                         </div>
-                                    }.into_view()
+                                    }.into_any()
                                 }}
 
                                 <Board
@@ -1937,7 +1934,7 @@ pub fn App() -> impl IntoView {
                                 {move || {
                                     let st = game_state.get();
                                     if is_local_mode.get() || st.is_game_started {
-                                        return view! {}.into_view();
+                                        return ().into_any();
                                     }
                                     let my_id = my_player_id.get();
                                     let is_host = my_id
@@ -1999,7 +1996,7 @@ pub fn App() -> impl IntoView {
                                                                         {badge}
                                                                     </span>
                                                                 </div>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         } else {
                                                             view! {
                                                                 <div style=format!(
@@ -2010,7 +2007,7 @@ pub fn App() -> impl IntoView {
                                                                         {format!("Vị trí T{} · Đang chờ người chơi...", seat_idx + 1)}
                                                                     </span>
                                                                 </div>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         }
                                                     }).collect_view()}
                                                 </div>
@@ -2022,22 +2019,22 @@ pub fn App() -> impl IntoView {
                                                                 class="btn"
                                                                 style="flex: 1;"
                                                                 disabled=move || player_count < 2
-                                                                on:click=move |_| handle_action.call(ClientMessage::StartGame)
+                                                                on:click=move |_| handle_action.run(ClientMessage::StartGame)
                                                             >
                                                                 "Bắt đầu ván đấu"
                                                             </button>
                                                         </div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
                                                     view! {
                                                         <div style=format!("text-align: center; font-size: 13px; color: {}; padding: 4px 0;", TEXT_SECONDARY)>
                                                             {format!("Đang chờ chủ phòng bắt đầu ván đấu (tự động bắt đầu khi đủ {} người)...", max_p)}
                                                         </div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 }}
                                             </div>
                                         </div>
-                                    }.into_view()
+                                    }.into_any()
                                 }}
 
                                 <div class="floating-dice-hud">
@@ -2061,10 +2058,10 @@ pub fn App() -> impl IntoView {
                                                 <span style=format!("font-size: 13px; font-weight: 600; color: {}; padding: 0 8px;", STATUS_SUCCESS)>
                                                     {format!("Người thắng: {}", winner_name)}
                                                 </span>
-                                            }.into_view();
+                                            }.into_any();
                                         }
 
-                                        let mut context_buttons: Vec<View> = Vec::new();
+                                        let mut context_buttons: Vec<AnyView> = Vec::new();
 
                                         if !busy && st.turn_phase == TurnPhase::Auction {
                                             if let (Some(me), Some(auc)) = (me_opt, st.auction.as_ref()) {
@@ -2078,23 +2075,23 @@ pub fn App() -> impl IntoView {
                                                             <span class="mono" style=format!("font-size: 12px; font-weight: 600; color: {}; padding: 0 4px;", STATUS_WARNING)>
                                                                 {format!("Đấu giá · {}", bidder_name)}
                                                             </span>
-                                                        }.into_view());
+                                                        }.into_any());
                                                     }
                                                     context_buttons.push(view! {
                                                         <button
                                                             class="btn-hud-pill btn-hud-buy"
                                                             disabled=move || !can_bid
-                                                            on:click=move |_| handle_action.call(ClientMessage::PlaceBid { amount: next_bid })
+                                                            on:click=move |_| handle_action.run(ClientMessage::PlaceBid { amount: next_bid })
                                                         >
                                                             {format!("Trả {}", next_bid)}
                                                         </button>
                                                         <button
                                                             class="btn-hud-pill btn-hud-secondary"
-                                                            on:click=move |_| handle_action.call(ClientMessage::PassAuction)
+                                                            on:click=move |_| handle_action.run(ClientMessage::PassAuction)
                                                         >
                                                             "Bỏ đấu giá"
                                                         </button>
-                                                    }.into_view());
+                                                    }.into_any());
                                                 }
                                             }
                                         } else if !busy && is_my_turn {
@@ -2115,17 +2112,17 @@ pub fn App() -> impl IntoView {
                                                             <button
                                                                 class="btn-hud-pill btn-hud-buy"
                                                                 disabled=move || !can_buy
-                                                                on:click=move |_| handle_action.call(ClientMessage::BuyProperty)
+                                                                on:click=move |_| handle_action.run(ClientMessage::BuyProperty)
                                                             >
                                                                 {buy_label}
                                                             </button>
                                                             <button
                                                                 class="btn-hud-pill btn-hud-secondary"
-                                                                on:click=move |_| handle_action.call(ClientMessage::DeclineProperty)
+                                                                on:click=move |_| handle_action.run(ClientMessage::DeclineProperty)
                                                             >
                                                                 "Bỏ qua"
                                                             </button>
-                                                        }.into_view());
+                                                        }.into_any());
                                                     }
                                                 }
                                                 TurnPhase::WaitingForRoll => {
@@ -2136,21 +2133,21 @@ pub fn App() -> impl IntoView {
                                                                 context_buttons.push(view! {
                                                                     <button
                                                                         class="btn-hud-pill btn-hud-buy"
-                                                                        on:click=move |_| handle_action.call(ClientMessage::UseJailCard)
+                                                                        on:click=move |_| handle_action.run(ClientMessage::UseJailCard)
                                                                     >
                                                                         "Dùng thẻ ra tù"
                                                                     </button>
-                                                                }.into_view());
+                                                                }.into_any());
                                                             }
                                                             context_buttons.push(view! {
                                                                 <button
                                                                     class="btn-hud-pill btn-hud-secondary"
                                                                     disabled=move || !can_bail
-                                                                    on:click=move |_| handle_action.call(ClientMessage::PayJailBail)
+                                                                    on:click=move |_| handle_action.run(ClientMessage::PayJailBail)
                                                                 >
                                                                     "Bảo lãnh 500k"
                                                                 </button>
-                                                            }.into_view());
+                                                            }.into_any());
                                                         }
                                                     }
                                                 }
@@ -2160,11 +2157,11 @@ pub fn App() -> impl IntoView {
                                                         context_buttons.push(view! {
                                                             <button
                                                                 class="btn-hud-pill btn-hud-secondary"
-                                                                on:click=move |_| handle_action.call(ClientMessage::EndTurn)
+                                                                on:click=move |_| handle_action.run(ClientMessage::EndTurn)
                                                             >
                                                                 "Kết thúc lượt"
                                                             </button>
-                                                        }.into_view());
+                                                        }.into_any());
                                                     }
                                                 }
                                             }
@@ -2197,7 +2194,7 @@ pub fn App() -> impl IntoView {
                                                         }
                                                     }}
                                                 </span>
-                                            }.into_view());
+                                            }.into_any());
                                         }
 
                                         let roll_disabled = busy
@@ -2228,7 +2225,7 @@ pub fn App() -> impl IntoView {
                                             <button
                                                 class="btn-roll-dice"
                                                 disabled=roll_disabled
-                                                on:click=move |_| trigger_roll_dice.call(())
+                                                on:click=move |_| trigger_roll_dice.run(())
                                             >
                                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                     <rect x="3" y="3" width="18" height="18" rx="4" />
@@ -2243,7 +2240,7 @@ pub fn App() -> impl IntoView {
                                                     {format!("({}+{})", d1, d2)}
                                                 </span>
                                             </button>
-                                        }.into_view()
+                                        }.into_any()
                                     }}
                                 </div>
 
@@ -2272,13 +2269,13 @@ pub fn App() -> impl IntoView {
                                                 </div>
                                                 <LogFeed logs=logs />
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        view! {}.into_view()
+                                        ().into_any()
                                     }
                                 }}
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }
                 }
             }}
@@ -2424,9 +2421,9 @@ pub fn App() -> impl IntoView {
                                 </ol>
                             </div>
                         </div>
-                    }.into_view()
+                    }.into_any()
                 } else {
-                    view! {}.into_view()
+                    ().into_any()
                 }
             }}
         </div>
