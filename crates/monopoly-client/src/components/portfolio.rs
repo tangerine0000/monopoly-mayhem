@@ -1,6 +1,8 @@
 //! Tài sản của người chơi: mỗi nhóm một dòng (tên, vạch tiến độ, một hành động hoặc gợi ý).
 
-use crate::palette::{get_district_color, get_district_label, ALL_DISTRICTS, TILE_STATION, TILE_UTILITY};
+use crate::palette::{
+    get_district_color, get_district_label, ALL_DISTRICTS, TILE_STATION, TILE_UTILITY,
+};
 use leptos::*;
 use monopoly_core::board::{get_board, get_district_tiles, TileKind};
 use monopoly_core::state::GameState;
@@ -26,7 +28,10 @@ fn rows_for(s: &GameState, me: PlayerId) -> Vec<Row> {
 
     for d in ALL_DISTRICTS {
         let tiles = get_district_tiles(d);
-        let slots: Vec<(u8, bool)> = tiles.iter().map(|&t| (t, s.properties[t as usize].owner == Some(me))).collect();
+        let slots: Vec<(u8, bool)> = tiles
+            .iter()
+            .map(|&t| (t, s.properties[t as usize].owner == Some(me)))
+            .collect();
         let mine = slots.iter().filter(|x| x.1).count();
         if mine == 0 {
             continue;
@@ -38,7 +43,11 @@ fn rows_for(s: &GameState, me: PlayerId) -> Vec<Row> {
         } else if tiles.iter().any(|&t| s.properties[t as usize].is_mortgaged) {
             hint = "đang thế chấp".to_string();
         } else {
-            let target = tiles.iter().copied().min_by_key(|&t| (s.properties[t as usize].house_count, t)).unwrap();
+            let target = tiles
+                .iter()
+                .copied()
+                .min_by_key(|&t| (s.properties[t as usize].house_count, t))
+                .unwrap();
             let houses = s.properties[target as usize].house_count;
             let house_cost = match &board[target as usize].kind {
                 TileKind::Property(p) => Some(p.house_cost),
@@ -75,12 +84,26 @@ fn rows_for(s: &GameState, me: PlayerId) -> Vec<Row> {
     let stations = group(|k| matches!(k, TileKind::Station(_)));
     let n = stations.iter().filter(|x| x.1).count();
     if n > 0 {
-        rows.push(Row { key: "st".into(), label: "Bến xe & ga".into(), color: TILE_STATION, slots: stations, build_on: None, hint: format!("có {n}/4") });
+        rows.push(Row {
+            key: "st".into(),
+            label: "Bến xe & ga".into(),
+            color: TILE_STATION,
+            slots: stations,
+            build_on: None,
+            hint: format!("có {n}/4"),
+        });
     }
     let utils = group(|k| matches!(k, TileKind::Utility(_)));
     let n = utils.iter().filter(|x| x.1).count();
     if n > 0 {
-        rows.push(Row { key: "ut".into(), label: "Điện & nước".into(), color: TILE_UTILITY, slots: utils, build_on: None, hint: format!("có {n}/2") });
+        rows.push(Row {
+            key: "ut".into(),
+            label: "Điện & nước".into(),
+            color: TILE_UTILITY,
+            slots: utils,
+            build_on: None,
+            hint: format!("có {n}/2"),
+        });
     }
     rows
 }

@@ -56,7 +56,11 @@ fn current_rent_text(s: &GameState, tile: &Tile, prop: PropertyState) -> Option<
         }
         TileKind::Station(_) => fmt_short(station_rent(s.stations_owned_by(owner))),
         TileKind::Utility(_) => {
-            let mult = if s.utilities_owned_by(owner) >= 2 { 10 } else { 4 };
+            let mult = if s.utilities_owned_by(owner) >= 2 {
+                10
+            } else {
+                4
+            };
             format!("{mult} × xúc xắc")
         }
         _ => return None,
@@ -89,17 +93,41 @@ fn completed_district_after_trade(
     None
 }
 
-fn trade_effect_line(s: &GameState, offer: &TradeOffer, viewer_is_receiver: bool) -> Option<String> {
-    let from_name = s.find_player(offer.from).map(|p| p.name.as_str()).unwrap_or("Đối thủ");
-    let to_name = s.find_player(offer.to).map(|p| p.name.as_str()).unwrap_or("Đối thủ");
+fn trade_effect_line(
+    s: &GameState,
+    offer: &TradeOffer,
+    viewer_is_receiver: bool,
+) -> Option<String> {
+    let from_name = s
+        .find_player(offer.from)
+        .map(|p| p.name.as_str())
+        .unwrap_or("Đối thủ");
+    let to_name = s
+        .find_player(offer.to)
+        .map(|p| p.name.as_str())
+        .unwrap_or("Đối thủ");
 
-    if let Some(d) = completed_district_after_trade(s, offer.to, &offer.give_tiles, &offer.take_tiles) {
+    if let Some(d) =
+        completed_district_after_trade(s, offer.to, &offer.give_tiles, &offer.take_tiles)
+    {
         let who = if viewer_is_receiver { "bạn" } else { to_name };
-        return Some(format!("Sau giao dịch, {who} đủ bộ {}", get_district_label(d)));
+        return Some(format!(
+            "Sau giao dịch, {who} đủ bộ {}",
+            get_district_label(d)
+        ));
     }
-    if let Some(d) = completed_district_after_trade(s, offer.from, &offer.take_tiles, &offer.give_tiles) {
-        let who = if viewer_is_receiver { from_name } else { "bạn" };
-        return Some(format!("Sau giao dịch, {who} đủ bộ {}", get_district_label(d)));
+    if let Some(d) =
+        completed_district_after_trade(s, offer.from, &offer.take_tiles, &offer.give_tiles)
+    {
+        let who = if viewer_is_receiver {
+            from_name
+        } else {
+            "bạn"
+        };
+        return Some(format!(
+            "Sau giao dịch, {who} đủ bộ {}",
+            get_district_label(d)
+        ));
     }
     None
 }
@@ -145,20 +173,39 @@ fn die_view(value: u8, class: String) -> View {
 fn RentTable(tile: Tile, prop: PropertyState, state: ReadSignal<GameState>) -> impl IntoView {
     let rows: Vec<(String, String, bool)> = state.with(|s| match &tile.kind {
         TileKind::Property(p) => {
-            let full = prop.owner.map(|o| s.owns_full_district(o, p.district)).unwrap_or(false);
+            let full = prop
+                .owner
+                .map(|o| s.owns_full_district(o, p.district))
+                .unwrap_or(false);
             let h = prop.house_count;
             let owned = prop.owner.is_some();
             let mut v = vec![
-                ("Đất trống".to_string(), fmt_short(p.rent_table[0]), owned && h == 0 && !full),
-                ("Đủ bộ quận (×2)".to_string(), fmt_short(Money(p.rent_table[0].0 * 2)), owned && h == 0 && full),
+                (
+                    "Đất trống".to_string(),
+                    fmt_short(p.rent_table[0]),
+                    owned && h == 0 && !full,
+                ),
+                (
+                    "Đủ bộ quận (×2)".to_string(),
+                    fmt_short(Money(p.rent_table[0].0 * 2)),
+                    owned && h == 0 && full,
+                ),
             ];
             for n in 1..=4u8 {
-                v.push((format!("{n} nhà"), fmt_short(p.rent_table[n as usize]), h == n));
+                v.push((
+                    format!("{n} nhà"),
+                    fmt_short(p.rent_table[n as usize]),
+                    h == n,
+                ));
             }
             v.push(("Khách sạn".to_string(), fmt_short(p.rent_table[5]), h == 5));
             v.push((
                 "Xây mỗi nhà · thế chấp".to_string(),
-                format!("{} · {}", fmt_short(p.house_cost), fmt_short(p.mortgage_value)),
+                format!(
+                    "{} · {}",
+                    fmt_short(p.house_cost),
+                    fmt_short(p.mortgage_value)
+                ),
                 false,
             ));
             v
@@ -172,8 +219,16 @@ fn RentTable(tile: Tile, prop: PropertyState, state: ReadSignal<GameState>) -> i
         TileKind::Utility(_) => {
             let cnt = prop.owner.map(|o| s.utilities_owned_by(o)).unwrap_or(0);
             vec![
-                ("Có 1 công trình".to_string(), "4 × xúc xắc".to_string(), cnt == 1),
-                ("Có 2 công trình".to_string(), "10 × xúc xắc".to_string(), cnt == 2),
+                (
+                    "Có 1 công trình".to_string(),
+                    "4 × xúc xắc".to_string(),
+                    cnt == 1,
+                ),
+                (
+                    "Có 2 công trình".to_string(),
+                    "10 × xúc xắc".to_string(),
+                    cnt == 2,
+                ),
             ]
         }
         _ => vec![],
@@ -300,7 +355,11 @@ pub fn Stage(
     let turn_pill = move || {
         let (seat, name, is_me) = state.with(|s| {
             let cur = s.current_player()?;
-            Some((seat_of(s, cur.id)?, cur.name.clone(), Some(cur.id) == my_player_id.get()))
+            Some((
+                seat_of(s, cur.id)?,
+                cur.name.clone(),
+                Some(cur.id) == my_player_id.get(),
+            ))
         })?;
         if state.with(|s| s.is_game_over || !s.is_game_started) {
             return None;
@@ -392,21 +451,41 @@ pub fn Stage(
                         .count();
                     let label = get_district_label(p.district);
                     if mine + 1 == all.len() {
-                        (format!("Đủ bộ {label}"), "Thuê ×2 và được xây nhà".to_string(), true)
+                        (
+                            format!("Đủ bộ {label}"),
+                            "Thuê ×2 và được xây nhà".to_string(),
+                            true,
+                        )
                     } else if mine == 0 {
-                        (format!("Ô đầu tiên ở {label}"), format!("Gom đủ {} ô để thuê ×2", all.len()), false)
+                        (
+                            format!("Ô đầu tiên ở {label}"),
+                            format!("Gom đủ {} ô để thuê ×2", all.len()),
+                            false,
+                        )
                     } else {
-                        (format!("Ô thứ {}/{} ở {label}", mine + 1, all.len()), "Cần đủ bộ để xây nhà".to_string(), false)
+                        (
+                            format!("Ô thứ {}/{} ở {label}", mine + 1, all.len()),
+                            "Cần đủ bộ để xây nhà".to_string(),
+                            false,
+                        )
                     }
                 }
                 TileKind::Station(_) => {
                     let n = s.stations_owned_by(me_id) + 1;
-                    (format!("Bến thứ {n}/4"), format!("Thu vé {}", fmt_short(station_rent(n))), n == 4)
+                    (
+                        format!("Bến thứ {n}/4"),
+                        format!("Thu vé {}", fmt_short(station_rent(n))),
+                        n == 4,
+                    )
                 }
                 TileKind::Utility(_) => {
                     let n = s.utilities_owned_by(me_id) + 1;
                     let mult = if n >= 2 { 10 } else { 4 };
-                    (format!("Công trình thứ {n}/2"), format!("Thu {mult} × xúc xắc"), n == 2)
+                    (
+                        format!("Công trình thứ {n}/2"),
+                        format!("Thu {mult} × xúc xắc"),
+                        n == 2,
+                    )
                 }
                 _ => (String::new(), String::new(), false),
             };
@@ -472,9 +551,13 @@ pub fn Stage(
         let (tile, bid, leader, bidders, my_cash, i_am_in, i_am_leading) = state.with(|s| {
             let a = s.auction.as_ref()?;
             let tile = get_board()[a.tile_index as usize].clone();
-            let leader = a
-                .highest_bidder
-                .and_then(|id| Some((seat_of(s, id)?, s.find_player(id)?.name.clone(), Some(id) == me)));
+            let leader = a.highest_bidder.and_then(|id| {
+                Some((
+                    seat_of(s, id)?,
+                    s.find_player(id)?.name.clone(),
+                    Some(id) == me,
+                ))
+            });
             let bidders: Vec<(usize, bool)> = s
                 .players
                 .iter()
@@ -482,10 +565,21 @@ pub fn Stage(
                 .filter(|(_, p)| !p.is_bankrupt)
                 .map(|(i, p)| (i, a.active_bidders.contains(&p.id)))
                 .collect();
-            let my_cash = me.and_then(|id| s.find_player(id)).map(|p| p.cash).unwrap_or(Money::ZERO);
+            let my_cash = me
+                .and_then(|id| s.find_player(id))
+                .map(|p| p.cash)
+                .unwrap_or(Money::ZERO);
             let i_am_in = me.map(|id| a.active_bidders.contains(&id)).unwrap_or(false);
             let i_am_leading = me.is_some() && a.highest_bidder == me;
-            Some((tile, a.current_bid, leader, bidders, my_cash, i_am_in, i_am_leading))
+            Some((
+                tile,
+                a.current_bid,
+                leader,
+                bidders,
+                my_cash,
+                i_am_in,
+                i_am_leading,
+            ))
         })?;
         let color = tile_color(&tile);
         let base = tile_cost(&tile).map(fmt_short).unwrap_or_default();
@@ -558,7 +652,10 @@ pub fn Stage(
             let me = s.find_player(me_id)?;
             let creditor_label = match debt.creditors.as_slice() {
                 [] => "Ngân hàng".to_string(),
-                [single] => s.find_player(*single).map(|p| p.name.clone()).unwrap_or_else(|| "Đối thủ".to_string()),
+                [single] => s
+                    .find_player(*single)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| "Đối thủ".to_string()),
                 _ => "tất cả người chơi".to_string(),
             };
             let board = get_board();
@@ -572,12 +669,24 @@ pub fn Stage(
                 match &tile.kind {
                     TileKind::Property(p) => {
                         let d_tiles = get_district_tiles(p.district);
-                        let max_h = d_tiles.iter().map(|&d| s.properties[d as usize].house_count).max().unwrap_or(0);
+                        let max_h = d_tiles
+                            .iter()
+                            .map(|&d| s.properties[d as usize].house_count)
+                            .max()
+                            .unwrap_or(0);
                         if prop.house_count > 0 && prop.house_count == max_h {
-                            sell_opts.push((idx as u8, tile_short_name(tile), Money(p.house_cost.0 / 2)));
+                            sell_opts.push((
+                                idx as u8,
+                                tile_short_name(tile),
+                                Money(p.house_cost.0 / 2),
+                            ));
                         }
                         if !prop.is_mortgaged && max_h == 0 {
-                            mortgage_opts.push((idx as u8, tile_short_name(tile), p.mortgage_value));
+                            mortgage_opts.push((
+                                idx as u8,
+                                tile_short_name(tile),
+                                p.mortgage_value,
+                            ));
                         }
                     }
                     TileKind::Station(st) if !prop.is_mortgaged => {
@@ -589,7 +698,13 @@ pub fn Stage(
                     _ => {}
                 }
             }
-            Some((creditor_label, debt.amount, me.cash, sell_opts, mortgage_opts))
+            Some((
+                creditor_label,
+                debt.amount,
+                me.cash,
+                sell_opts,
+                mortgage_opts,
+            ))
         })?;
         let enough = my_cash >= debt_amt;
         let pct = if debt_amt.0 > 0 {
@@ -597,7 +712,11 @@ pub fn Stage(
         } else {
             100.0
         };
-        let lack = if enough { Money::ZERO } else { debt_amt - my_cash };
+        let lack = if enough {
+            Money::ZERO
+        } else {
+            debt_amt - my_cash
+        };
         Some(view! {
             <div class="sheet" role="dialog" aria-label="Gom tiền trả nợ">
                 <div class="sheet-head" style="background: var(--son);">
@@ -713,34 +832,56 @@ pub fn Stage(
     // ---------- Soạn đề nghị giao dịch ----------
     let propose_trade = move || {
         let me_id = my_player_id.get()?;
-        let (opponents, my_tiles, my_cash, target_id, target_tiles, target_cash, effect_line) = state.with(|s| {
-            let opponents: Vec<(PlayerId, usize, String)> = s
-                .players
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| !p.is_bankrupt && p.id != me_id)
-                .map(|(i, p)| (p.id, i, p.name.clone()))
-                .collect();
-            let my_tiles = tradable_tiles_of(s, me_id);
-            let my_cash = s.find_player(me_id).map(|p| p.cash).unwrap_or(Money::ZERO);
-            let target_id = trade_to.get().filter(|id| opponents.iter().any(|o| o.0 == *id)).or_else(|| opponents.first().map(|o| o.0));
-            let target_tiles = target_id.map(|id| tradable_tiles_of(s, id)).unwrap_or_default();
-            let target_cash = target_id.and_then(|id| s.find_player(id)).map(|p| p.cash).unwrap_or(Money::ZERO);
-            let preview_offer = target_id.map(|to| TradeOffer {
-                from: me_id,
-                to,
-                give_tiles: give_tiles.get(),
-                give_cash: Money::from_vnd(give_cash_k.get() * 1_000),
-                take_tiles: take_tiles.get(),
-                take_cash: Money::from_vnd(take_cash_k.get() * 1_000),
+        let (opponents, my_tiles, my_cash, target_id, target_tiles, target_cash, effect_line) =
+            state.with(|s| {
+                let opponents: Vec<(PlayerId, usize, String)> = s
+                    .players
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| !p.is_bankrupt && p.id != me_id)
+                    .map(|(i, p)| (p.id, i, p.name.clone()))
+                    .collect();
+                let my_tiles = tradable_tiles_of(s, me_id);
+                let my_cash = s.find_player(me_id).map(|p| p.cash).unwrap_or(Money::ZERO);
+                let target_id = trade_to
+                    .get()
+                    .filter(|id| opponents.iter().any(|o| o.0 == *id))
+                    .or_else(|| opponents.first().map(|o| o.0));
+                let target_tiles = target_id
+                    .map(|id| tradable_tiles_of(s, id))
+                    .unwrap_or_default();
+                let target_cash = target_id
+                    .and_then(|id| s.find_player(id))
+                    .map(|p| p.cash)
+                    .unwrap_or(Money::ZERO);
+                let preview_offer = target_id.map(|to| TradeOffer {
+                    from: me_id,
+                    to,
+                    give_tiles: give_tiles.get(),
+                    give_cash: Money::from_vnd(give_cash_k.get() * 1_000),
+                    take_tiles: take_tiles.get(),
+                    take_cash: Money::from_vnd(take_cash_k.get() * 1_000),
+                });
+                let eff = preview_offer
+                    .as_ref()
+                    .and_then(|o| trade_effect_line(s, o, false));
+                (
+                    opponents,
+                    my_tiles,
+                    my_cash,
+                    target_id,
+                    target_tiles,
+                    target_cash,
+                    eff,
+                )
             });
-            let eff = preview_offer.as_ref().and_then(|o| trade_effect_line(s, o, false));
-            (opponents, my_tiles, my_cash, target_id, target_tiles, target_cash, eff)
-        });
         let target_id = target_id?;
         let g_cash = Money::from_vnd(give_cash_k.get() * 1_000);
         let t_cash = Money::from_vnd(take_cash_k.get() * 1_000);
-        let valid = (!give_tiles.with(|v| v.is_empty()) || !take_tiles.with(|v| v.is_empty()) || g_cash > Money::ZERO || t_cash > Money::ZERO)
+        let valid = (!give_tiles.with(|v| v.is_empty())
+            || !take_tiles.with(|v| v.is_empty())
+            || g_cash > Money::ZERO
+            || t_cash > Money::ZERO)
             && g_cash <= my_cash
             && t_cash <= target_cash;
 
@@ -878,20 +1019,34 @@ pub fn Stage(
                 .iter()
                 .enumerate()
                 .map(|(seat, p)| {
-                    let props = s.properties.iter().filter(|pr| pr.owner == Some(p.id)).count();
+                    let props = s
+                        .properties
+                        .iter()
+                        .filter(|pr| pr.owner == Some(p.id))
+                        .count();
                     let houses: u8 = s
                         .properties
                         .iter()
                         .filter(|pr| pr.owner == Some(p.id))
                         .map(|pr| pr.house_count)
                         .sum();
-                    (seat, p.name.clone(), s.net_worth(p.id), p.is_bankrupt, props, houses)
+                    (
+                        seat,
+                        p.name.clone(),
+                        s.net_worth(p.id),
+                        p.is_bankrupt,
+                        props,
+                        houses,
+                    )
                 })
                 .collect();
             list.sort_by(|a, b| a.3.cmp(&b.3).then_with(|| b.2.cmp(&a.2)));
             list
         });
-        let winner_name = standings.first().map(|x| x.1.clone()).unwrap_or_else(|| "Hoàn tất".to_string());
+        let winner_name = standings
+            .first()
+            .map(|x| x.1.clone())
+            .unwrap_or_else(|| "Hoàn tất".to_string());
         view! {
             <div class="sheet" role="dialog" aria-label="Kết thúc ván đấu">
                 <div class="sheet-head" style="background: var(--ochre); color: var(--ink);">
@@ -939,9 +1094,13 @@ pub fn Stage(
         let group = tile_group_label(&tile);
         let (prop, owner, rent) = state.with(|s| {
             let prop = s.properties[idx as usize];
-            let owner = prop
-                .owner
-                .and_then(|id| Some((seat_of(s, id)?, s.find_player(id)?.name.clone(), Some(id) == me)));
+            let owner = prop.owner.and_then(|id| {
+                Some((
+                    seat_of(s, id)?,
+                    s.find_player(id)?.name.clone(),
+                    Some(id) == me,
+                ))
+            });
             (prop, owner, current_rent_text(s, &tile, prop))
         });
         let purchasable = tile_cost(&tile).is_some();
@@ -950,7 +1109,10 @@ pub fn Stage(
             TileKind::Tax(t) => Some(format!("Dừng ở đây nộp {}", t.amount)),
             TileKind::Chance => Some("Dừng ở đây rút một thẻ Cơ hội".to_string()),
             TileKind::CommunityChest => Some("Dừng ở đây rút một thẻ Khí vận".to_string()),
-            TileKind::Jail => Some(format!("Chỉ ghé thăm. Bị giam thì nộp {} để ra", Money::from_vnd(JAIL_BAIL_VND))),
+            TileKind::Jail => Some(format!(
+                "Chỉ ghé thăm. Bị giam thì nộp {} để ra",
+                Money::from_vnd(JAIL_BAIL_VND)
+            )),
             TileKind::FreeParking => Some("Nghỉ chân, không mất gì".to_string()),
             TileKind::GoToJail => Some("Đi thẳng vào tạm giam, không qua Khởi hành".to_string()),
             _ => None,
@@ -1035,15 +1197,25 @@ pub fn Stage(
         let cur_main = main.get();
         if matches!(
             cur_main,
-            MainCard::Auction | MainCard::IncomingTrade | MainCard::Debt | MainCard::ProposeTrade | MainCard::OutgoingTrade
+            MainCard::Auction
+                | MainCard::IncomingTrade
+                | MainCard::Debt
+                | MainCard::ProposeTrade
+                | MainCard::OutgoingTrade
         ) {
             return ().into_view();
         }
         if is_my_turn() {
             let (in_jail, cards, can_trade) = state.with(|s| {
                 let p = my_player_id.get().and_then(|id| s.find_player(id));
-                let active_opps = s.players.iter().filter(|op| !op.is_bankrupt && Some(op.id) != my_player_id.get()).count();
-                let (j, c) = p.map(|me| (me.in_jail, me.get_out_of_jail_cards)).unwrap_or((false, 0));
+                let active_opps = s
+                    .players
+                    .iter()
+                    .filter(|op| !op.is_bankrupt && Some(op.id) != my_player_id.get())
+                    .count();
+                let (j, c) = p
+                    .map(|me| (me.in_jail, me.get_out_of_jail_cards))
+                    .unwrap_or((false, 0));
                 (j, c, active_opps > 0 && s.trade.is_none())
             });
             match phase() {
@@ -1079,12 +1251,21 @@ pub fn Stage(
             }
         } else if phase() == TurnPhase::Debt {
             let debtor_name = state.with(|s| {
-                s.debt.as_ref().and_then(|d| s.find_player(d.debtor)).map(|p| p.name.clone()).unwrap_or_default()
+                s.debt
+                    .as_ref()
+                    .and_then(|d| s.find_player(d.debtor))
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default()
             });
             view! { <div class="waiting"><span>"Đang chờ "<b>{debtor_name}</b>" gom tiền trả nợ…"</span></div> }.into_view()
         } else if phase() != TurnPhase::Auction {
-            let name = state.with(|s| s.current_player().map(|p| p.name.clone()).unwrap_or_default());
-            view! { <div class="waiting"><span>"Đang chờ "<b>{name}</b>"…"</span></div> }.into_view()
+            let name = state.with(|s| {
+                s.current_player()
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default()
+            });
+            view! { <div class="waiting"><span>"Đang chờ "<b>{name}</b>"…"</span></div> }
+                .into_view()
         } else {
             ().into_view()
         }

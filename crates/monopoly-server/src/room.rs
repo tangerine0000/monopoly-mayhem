@@ -475,7 +475,10 @@ impl RoomActor {
                 self.state = new_state;
 
                 let restart_auction_clock = events.iter().any(|e| {
-                    matches!(e, ServerMessage::AuctionStarted { .. } | ServerMessage::BidPlaced { .. })
+                    matches!(
+                        e,
+                        ServerMessage::AuctionStarted { .. } | ServerMessage::BidPlaced { .. }
+                    )
                 });
                 for ev in events {
                     self.broadcast(ev).await;
@@ -553,7 +556,11 @@ impl RoomActor {
         let tx = self.self_tx.clone();
         self.auction_timer_handle = Some(tokio::spawn(async move {
             for s in (0..=AUCTION_SECONDS).rev() {
-                if tx.send(RoomCommand::AuctionTick(generation, s)).await.is_err() {
+                if tx
+                    .send(RoomCommand::AuctionTick(generation, s))
+                    .await
+                    .is_err()
+                {
                     return;
                 }
                 if s > 0 {

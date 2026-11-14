@@ -145,7 +145,8 @@ pub fn App() -> impl IntoView {
     let (landing_tile_burst, set_landing_tile_burst) = create_signal::<Option<u8>>(None);
     let (recent_acquired_tile, set_recent_acquired_tile) = create_signal::<Option<u8>>(None);
     let (recent_house_tile, set_recent_house_tile) = create_signal::<Option<u8>>(None);
-    let (floating_popups, set_floating_popups) = create_signal::<Vec<BoardFloatingPopup>>(Vec::new());
+    let (floating_popups, set_floating_popups) =
+        create_signal::<Vec<BoardFloatingPopup>>(Vec::new());
     let (cash_delta_badge, set_cash_delta_badge) = create_signal::<Option<(String, bool)>>(None);
     let (drawn_card_banner, set_drawn_card_banner) =
         create_signal::<Option<(String, String, String)>>(None);
@@ -681,11 +682,7 @@ pub fn App() -> impl IntoView {
                 set_trade_open.set(false);
                 play_sfx("cash_in");
             }
-            ServerMessage::TradeResolved {
-                from,
-                to,
-                accepted,
-            } => {
+            ServerMessage::TradeResolved { from, to, accepted } => {
                 let f_name = player_name_of(from);
                 let t_name = player_name_of(to);
                 if accepted {
@@ -716,7 +713,11 @@ pub fn App() -> impl IntoView {
             } => {
                 if let Some(w) = winner {
                     let wname = player_name_of(w);
-                    push_log(format!("{} trúng đấu giá với {}", wname, fmt_short(final_price)));
+                    push_log(format!(
+                        "{} trúng đấu giá với {}",
+                        wname,
+                        fmt_short(final_price)
+                    ));
                 } else {
                     push_log("Không ai trả giá, đất về Ngân hàng.".to_string());
                 }
@@ -1044,61 +1045,63 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    let connect_online: Rc<dyn Fn(String, String, bool)> = Rc::new(move |target_room: String, p_name: String, auction_on: bool| {
-        let trimmed_room = if target_room.trim().is_empty() {
-            format!("SGN-{}", Uuid::new_v4().to_string()[..4].to_uppercase())
-        } else {
-            target_room.trim().to_uppercase()
-        };
-        let trimmed_name = if p_name.trim().is_empty() {
-            "Khách Sài Gòn".to_string()
-        } else {
-            p_name.trim().to_string()
-        };
+    let connect_online: Rc<dyn Fn(String, String, bool)> = Rc::new(
+        move |target_room: String, p_name: String, auction_on: bool| {
+            let trimmed_room = if target_room.trim().is_empty() {
+                format!("SGN-{}", Uuid::new_v4().to_string()[..4].to_uppercase())
+            } else {
+                target_room.trim().to_uppercase()
+            };
+            let trimmed_name = if p_name.trim().is_empty() {
+                "Khách Sài Gòn".to_string()
+            } else {
+                p_name.trim().to_string()
+            };
 
-        set_room_id.set(trimmed_room.clone());
-        set_player_name.set(trimmed_name.clone());
-        set_is_local_mode.set(false);
-        set_in_game.set(true);
-        set_logs.set(Vec::new());
-        set_selected_tile.set(None);
-        set_trade_open.set(false);
-        set_manual_cam_tile.set(None);
+            set_room_id.set(trimmed_room.clone());
+            set_player_name.set(trimmed_name.clone());
+            set_is_local_mode.set(false);
+            set_in_game.set(true);
+            set_logs.set(Vec::new());
+            set_selected_tile.set(None);
+            set_trade_open.set(false);
+            set_manual_cam_tile.set(None);
 
-        let window = web_sys::window().expect("window");
-        let loc = window.location();
-        let proto = if loc.protocol().unwrap_or_default() == "https:" {
-            "wss"
-        } else {
-            "ws"
-        };
-        let host = loc.host().unwrap_or_else(|_| "127.0.0.1:8080".to_string());
-        let ws_url = format!("{}://{}/ws/{}", proto, host, trimmed_room);
+            let window = web_sys::window().expect("window");
+            let loc = window.location();
+            let proto = if loc.protocol().unwrap_or_default() == "https:" {
+                "wss"
+            } else {
+                "ws"
+            };
+            let host = loc.host().unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+            let ws_url = format!("{}://{}/ws/{}", proto, host, trimmed_room);
 
-        let proc_rc = process_msg_rc.clone();
-        match WsClient::connect(
-            ws_url,
-            trimmed_room,
-            trimmed_name,
-            auction_on,
-            move |srv_msg| {
-                set_ws_connected.set(true);
-                proc_rc(srv_msg);
-            },
-            move || {
-                set_ws_connected.set(false);
-            },
-        ) {
-            Ok(client) => {
-                ws_client_ref.set_value(Some(Rc::new(client)));
-                set_ws_connected.set(true);
+            let proc_rc = process_msg_rc.clone();
+            match WsClient::connect(
+                ws_url,
+                trimmed_room,
+                trimmed_name,
+                auction_on,
+                move |srv_msg| {
+                    set_ws_connected.set(true);
+                    proc_rc(srv_msg);
+                },
+                move || {
+                    set_ws_connected.set(false);
+                },
+            ) {
+                Ok(client) => {
+                    ws_client_ref.set_value(Some(Rc::new(client)));
+                    set_ws_connected.set(true);
+                }
+                Err(e) => {
+                    show_error(format!("Không thể kết nối máy chủ: {}", e));
+                    set_in_game.set(false);
+                }
             }
-            Err(e) => {
-                show_error(format!("Không thể kết nối máy chủ: {}", e));
-                set_in_game.set(false);
-            }
-        }
-    });
+        },
+    );
 
     let start_local_game = {
         let bots_slot = schedule_bots_slot.clone();

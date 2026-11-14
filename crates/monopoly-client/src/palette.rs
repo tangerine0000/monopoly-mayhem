@@ -94,7 +94,12 @@ pub fn tile_group_label(tile: &Tile) -> &'static str {
 pub fn tile_short_name(tile: &Tile) -> String {
     match &tile.kind {
         // "Xuân Thủy (Thảo Điền)" -> "Xuân Thủy"
-        TileKind::Property(_) => tile.name.split(" (").next().unwrap_or(&tile.name).to_string(),
+        TileKind::Property(_) => tile
+            .name
+            .split(" (")
+            .next()
+            .unwrap_or(&tile.name)
+            .to_string(),
         TileKind::Station(_) => tile
             .name
             .replace("Bến Xe ", "BX ")

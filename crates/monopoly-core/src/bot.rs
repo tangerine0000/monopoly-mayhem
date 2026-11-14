@@ -43,9 +43,9 @@ fn completes_district(state: &GameState, player: PlayerId, gained: &[u8]) -> boo
     let board = get_board();
     gained.iter().any(|&t| {
         if let TileKind::Property(p) = &board[t as usize].kind {
-            get_district_tiles(p.district)
-                .iter()
-                .all(|&d| d == t || state.properties[d as usize].owner == Some(player) || gained.contains(&d))
+            get_district_tiles(p.district).iter().all(|&d| {
+                d == t || state.properties[d as usize].owner == Some(player) || gained.contains(&d)
+            })
         } else {
             false
         }
@@ -103,15 +103,26 @@ fn build_step(state: &GameState, me: PlayerId) -> Option<ClientMessage> {
     let board = get_board();
     let cash = state.find_player(me)?.cash;
     for (idx, tile) in board.iter().enumerate() {
-        let TileKind::Property(p) = &tile.kind else { continue };
+        let TileKind::Property(p) = &tile.kind else {
+            continue;
+        };
         if state.properties[idx].owner != Some(me) || !state.owns_full_district(me, p.district) {
             continue;
         }
         let tiles = get_district_tiles(p.district);
-        let min = tiles.iter().map(|&d| state.properties[d as usize].house_count).min().unwrap_or(0);
+        let min = tiles
+            .iter()
+            .map(|&d| state.properties[d as usize].house_count)
+            .min()
+            .unwrap_or(0);
         let here = state.properties[idx].house_count;
-        if here == min && here < 5 && cash.0 - p.house_cost.0 >= Money::from_vnd(BUILD_RESERVE_VND).0 {
-            return Some(ClientMessage::BuildHouse { tile_index: idx as u8 });
+        if here == min
+            && here < 5
+            && cash.0 - p.house_cost.0 >= Money::from_vnd(BUILD_RESERVE_VND).0
+        {
+            return Some(ClientMessage::BuildHouse {
+                tile_index: idx as u8,
+            });
         }
     }
     None
@@ -132,7 +143,9 @@ pub fn decide_action(state: &GameState, me: PlayerId) -> Option<ClientMessage> {
         let give = bundle_value(state, &t.take_tiles, t.take_cash);
         let helps_rival = completes_district(state, t.from, &t.take_tiles);
         let threshold = if helps_rival { give * 2 } else { give * 5 / 4 };
-        return Some(ClientMessage::RespondTrade { accept: receive > 0 && receive >= threshold });
+        return Some(ClientMessage::RespondTrade {
+            accept: receive > 0 && receive >= threshold,
+        });
     }
 
     // 2. Đấu giá: bất kỳ ai còn trong phiên, trừ người đang dẫn
@@ -225,10 +238,16 @@ mod tests {
                     .iter()
                     .map(|p| p.id)
                     .find(|&id| decide_action(&s, id).is_some())
-                    .unwrap_or_else(|| panic!("seed {seed} bước {step}: không ai hành động, pha {:?}", s.turn_phase));
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "seed {seed} bước {step}: không ai hành động, pha {:?}",
+                            s.turn_phase
+                        )
+                    });
                 let action = decide_action(&s, actor).unwrap();
-                let (next, _) = apply_action(&s, actor, &action, &mut rng)
-                    .unwrap_or_else(|e| panic!("seed {seed} bước {step}: {action:?} bị từ chối: {e}"));
+                let (next, _) = apply_action(&s, actor, &action, &mut rng).unwrap_or_else(|e| {
+                    panic!("seed {seed} bước {step}: {action:?} bị từ chối: {e}")
+                });
                 s = next;
             }
         }

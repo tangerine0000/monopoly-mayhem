@@ -342,7 +342,9 @@ async fn test_configure_game_host_only_and_rejected_after_start() {
     )
     .await;
     let _ = recv_msg(&mut stream1).await.expect("RoomJoined p1");
-    let _ = recv_msg(&mut stream1).await.expect("Initial SyncSnapshot p1");
+    let _ = recv_msg(&mut stream1)
+        .await
+        .expect("Initial SyncSnapshot p1");
 
     // Host disables auction before start
     send_json(
@@ -486,9 +488,7 @@ async fn test_ws_trade_propose_cancel_and_accept() {
 
     let mut got_proposed = false;
     for _ in 0..8 {
-        if let Some(ServerMessage::TradeProposed { from, to }) =
-            recv_msg(&mut other_stream).await
-        {
+        if let Some(ServerMessage::TradeProposed { from, to }) = recv_msg(&mut other_stream).await {
             assert_eq!(from, active_id);
             assert_eq!(to, target_id);
             got_proposed = true;
@@ -532,7 +532,11 @@ async fn test_ws_trade_propose_cancel_and_accept() {
     }
     assert!(got_proposed2);
 
-    send_json(&mut other_sink, &ClientMessage::RespondTrade { accept: true }).await;
+    send_json(
+        &mut other_sink,
+        &ClientMessage::RespondTrade { accept: true },
+    )
+    .await;
 
     let mut resolved_ok = false;
     let mut synced_cash_ok = false;

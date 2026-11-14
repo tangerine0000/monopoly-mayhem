@@ -1,7 +1,9 @@
 use crate::board::{get_board, get_district_tiles, TileKind};
 use crate::cards::CardEffect;
 use crate::money::Money;
-use crate::state::{DebtSession, GameState, TradeOffer, TurnPhase, JAIL_BAIL_VND, PASS_GO_REWARD_VND};
+use crate::state::{
+    DebtSession, GameState, TradeOffer, TurnPhase, JAIL_BAIL_VND, PASS_GO_REWARD_VND,
+};
 use monopoly_proto::{ClientMessage, PlayerId, ServerMessage};
 use rand::Rng;
 use thiserror::Error;
@@ -655,9 +657,16 @@ pub fn apply_action(
                 .filter(|d| d.debtor == player_id)
                 .map(|d| d.creditors)
                 .unwrap_or_default();
-            let creditor = if creditors.len() == 1 { Some(creditors[0]) } else { None };
+            let creditor = if creditors.len() == 1 {
+                Some(creditors[0])
+            } else {
+                None
+            };
             // Tiền mặt còn lại chuyển cho chủ nợ
-            let cash = new_state.find_player(player_id).map(|p| p.cash).unwrap_or(Money::ZERO);
+            let cash = new_state
+                .find_player(player_id)
+                .map(|p| p.cash)
+                .unwrap_or(Money::ZERO);
             if let Some(c) = creditor {
                 if let Some(cp) = new_state.find_player_mut(c) {
                     cp.cash += cash;
@@ -669,16 +678,30 @@ pub fn apply_action(
         ClientMessage::PayDebt => {
             let debt = match new_state.debt.clone() {
                 Some(d) if d.debtor == player_id && new_state.turn_phase == TurnPhase::Debt => d,
-                _ => return Err(GameRuleError::InvalidAction("Bạn không có khoản nợ nào".to_string())),
+                _ => {
+                    return Err(GameRuleError::InvalidAction(
+                        "Bạn không có khoản nợ nào".to_string(),
+                    ))
+                }
             };
-            let cash = new_state.find_player(player_id).map(|p| p.cash).unwrap_or(Money::ZERO);
+            let cash = new_state
+                .find_player(player_id)
+                .map(|p| p.cash)
+                .unwrap_or(Money::ZERO);
             if cash < debt.amount {
                 return Err(GameRuleError::InsufficientFunds {
                     needed: debt.amount,
                     available: cash,
                 });
             }
-            settle(&mut new_state, player_id, &debt.creditors, debt.amount, debt.tile_index, &mut events);
+            settle(
+                &mut new_state,
+                player_id,
+                &debt.creditors,
+                debt.amount,
+                debt.tile_index,
+                &mut events,
+            );
             new_state.debt = None;
             new_state.turn_phase = TurnPhase::TurnEnded;
         }
@@ -690,13 +713,18 @@ pub fn apply_action(
             take_tiles,
             take_cash,
         } => {
-            if !matches!(new_state.turn_phase, TurnPhase::WaitingForRoll | TurnPhase::TurnEnded) {
+            if !matches!(
+                new_state.turn_phase,
+                TurnPhase::WaitingForRoll | TurnPhase::TurnEnded
+            ) {
                 return Err(GameRuleError::InvalidAction(
                     "Chỉ giao dịch được trước khi lắc hoặc sau khi đi xong".to_string(),
                 ));
             }
             if new_state.trade.is_some() {
-                return Err(GameRuleError::InvalidAction("Đang có một đề nghị chờ trả lời".to_string()));
+                return Err(GameRuleError::InvalidAction(
+                    "Đang có một đề nghị chờ trả lời".to_string(),
+                ));
             }
             let offer = TradeOffer {
                 from: player_id,
@@ -737,7 +765,9 @@ pub fn apply_action(
 
         ClientMessage::CancelTrade => {
             if new_state.trade.as_ref().map(|t| t.from) != Some(player_id) {
-                return Err(GameRuleError::InvalidAction("Không có đề nghị nào để rút".to_string()));
+                return Err(GameRuleError::InvalidAction(
+                    "Không có đề nghị nào để rút".to_string(),
+                ));
             }
             clear_trade(&mut new_state, &mut events);
         }
@@ -996,7 +1026,14 @@ fn pay_rent(
     amount: Money,
     events: &mut Vec<ServerMessage>,
 ) {
-    charge(state, payer_id, vec![recipient_id], amount, Some(tile_index), events);
+    charge(
+        state,
+        payer_id,
+        vec![recipient_id],
+        amount,
+        Some(tile_index),
+        events,
+    );
 }
 
 /// Chuyển `amount` từ `payer` cho các chủ nợ (chia đều; rỗng = ngân hàng).
@@ -1019,7 +1056,10 @@ fn settle(
         }
     }
     if let (Some(t), [single]) = (tile_index, creditors) {
-        if matches!(get_board()[t as usize].kind, TileKind::Property(_) | TileKind::Station(_) | TileKind::Utility(_)) {
+        if matches!(
+            get_board()[t as usize].kind,
+            TileKind::Property(_) | TileKind::Station(_) | TileKind::Utility(_)
+        ) {
             events.push(ServerMessage::RentPaid {
                 payer: payer_id,
                 recipient: *single,
@@ -1044,7 +1084,10 @@ pub fn charge(
     if amount <= Money::ZERO {
         return;
     }
-    let cash = state.find_player(payer_id).map(|p| p.cash).unwrap_or(Money::ZERO);
+    let cash = state
+        .find_player(payer_id)
+        .map(|p| p.cash)
+        .unwrap_or(Money::ZERO);
     if cash >= amount {
         settle(state, payer_id, &creditors, amount, tile_index, events);
         return;
@@ -1052,7 +1095,11 @@ pub fn charge(
     if cash + state.liquidation_value(payer_id) >= amount {
         events.push(ServerMessage::DebtIncurred {
             debtor: payer_id,
-            creditor: if creditors.len() == 1 { Some(creditors[0]) } else { None },
+            creditor: if creditors.len() == 1 {
+                Some(creditors[0])
+            } else {
+                None
+            },
             amount,
         });
         state.debt = Some(DebtSession {
@@ -1065,7 +1112,11 @@ pub fn charge(
         return;
     }
     // Không thể gom đủ: trả hết tiền mặt rồi phá sản
-    let creditor = if creditors.len() == 1 { Some(creditors[0]) } else { None };
+    let creditor = if creditors.len() == 1 {
+        Some(creditors[0])
+    } else {
+        None
+    };
     if cash > Money::ZERO {
         settle(state, payer_id, &creditors, cash, tile_index, events);
     }
@@ -1125,7 +1176,11 @@ fn validate_trade(state: &GameState, t: &TradeOffer) -> Result<(), GameRuleError
     if t.give_cash < Money::ZERO || t.take_cash < Money::ZERO {
         return invalid("Số tiền không hợp lệ");
     }
-    if t.give_tiles.is_empty() && t.take_tiles.is_empty() && t.give_cash == Money::ZERO && t.take_cash == Money::ZERO {
+    if t.give_tiles.is_empty()
+        && t.take_tiles.is_empty()
+        && t.give_cash == Money::ZERO
+        && t.take_cash == Money::ZERO
+    {
         return invalid("Đề nghị đang trống");
     }
     let board = get_board();
@@ -1148,12 +1203,21 @@ fn validate_trade(state: &GameState, t: &TradeOffer) -> Result<(), GameRuleError
     };
     check_tiles(&t.give_tiles, t.from)?;
     check_tiles(&t.take_tiles, t.to)?;
-    let from_cash = state.find_player(t.from).map(|p| p.cash).unwrap_or(Money::ZERO);
+    let from_cash = state
+        .find_player(t.from)
+        .map(|p| p.cash)
+        .unwrap_or(Money::ZERO);
     if from_cash < t.give_cash {
-        return Err(GameRuleError::InsufficientFunds { needed: t.give_cash, available: from_cash });
+        return Err(GameRuleError::InsufficientFunds {
+            needed: t.give_cash,
+            available: from_cash,
+        });
     }
     if to.cash < t.take_cash {
-        return Err(GameRuleError::InsufficientFunds { needed: t.take_cash, available: to.cash });
+        return Err(GameRuleError::InsufficientFunds {
+            needed: t.take_cash,
+            available: to.cash,
+        });
     }
     Ok(())
 }

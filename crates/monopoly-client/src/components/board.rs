@@ -108,7 +108,11 @@ fn hover_hint_for_tile(s: &GameState, tile: &Tile, idx: u8, my_id: Option<Player
                 fmt_short(rent)
             }
             TileKind::Utility(_) => {
-                let mult = if s.utilities_owned_by(owner_id) >= 2 { 10 } else { 4 };
+                let mult = if s.utilities_owned_by(owner_id) >= 2 {
+                    10
+                } else {
+                    4
+                };
                 format!("{mult} × xúc xắc")
             }
             _ => return tile.name.clone(),
@@ -155,7 +159,11 @@ pub fn Board(
             seats
                 .iter()
                 .map(|&(seat, at)| {
-                    let same: Vec<usize> = seats.iter().filter(|(_, t)| *t == at).map(|(s, _)| *s).collect();
+                    let same: Vec<usize> = seats
+                        .iter()
+                        .filter(|(_, t)| *t == at)
+                        .map(|(s, _)| *s)
+                        .collect();
                     let slot = same.iter().position(|s| *s == seat).unwrap_or(0);
                     (seat, at, slot, same.len())
                 })
@@ -420,7 +428,10 @@ mod tests {
         for i in 0..40u8 {
             let (c, r) = tile_cell(i);
             assert!((1..=11).contains(&c) && (1..=11).contains(&r));
-            assert!(c == 1 || c == 11 || r == 1 || r == 11, "ô {i} không nằm trên viền");
+            assert!(
+                c == 1 || c == 11 || r == 1 || r == 11,
+                "ô {i} không nằm trên viền"
+            );
             assert!(seen.insert((c, r)), "ô {i} trùng vị trí");
         }
     }
@@ -443,7 +454,10 @@ mod tests {
             for count in 1..=4 {
                 for slot in 0..count {
                     let (x, y) = token_anchor_pct(i, slot, count);
-                    assert!((0.0..=100.0).contains(&x) && (0.0..=100.0).contains(&y), "ô {i}: ({x},{y})");
+                    assert!(
+                        (0.0..=100.0).contains(&x) && (0.0..=100.0).contains(&y),
+                        "ô {i}: ({x},{y})"
+                    );
                 }
             }
         }

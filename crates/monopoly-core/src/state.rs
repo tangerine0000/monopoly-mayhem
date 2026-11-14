@@ -218,7 +218,10 @@ impl GameState {
     /// Tổng tài sản để xếp hạng: tiền mặt + giá đất (nửa nếu thế chấp) + giá nhà.
     pub fn net_worth(&self, player_id: PlayerId) -> Money {
         let board = get_board();
-        let mut total = self.find_player(player_id).map(|p| p.cash).unwrap_or(Money::ZERO);
+        let mut total = self
+            .find_player(player_id)
+            .map(|p| p.cash)
+            .unwrap_or(Money::ZERO);
         for (idx, prop) in self.properties.iter().enumerate() {
             if prop.owner != Some(player_id) {
                 continue;
@@ -229,7 +232,11 @@ impl GameState {
                 TileKind::Utility(u) => (u.cost, Money::ZERO),
                 _ => continue,
             };
-            total += if prop.is_mortgaged { Money(cost.0 / 2) } else { cost };
+            total += if prop.is_mortgaged {
+                Money(cost.0 / 2)
+            } else {
+                cost
+            };
             total += Money(house_cost.0 * prop.house_count as i64);
         }
         total
